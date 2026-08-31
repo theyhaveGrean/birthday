@@ -1329,19 +1329,79 @@ class VideoArchiveWindow(QMainWindow):
         if password:
             command.extend(["password", password])
 
-        try:
-            result = subprocess.run(
+        def run_connect():
+            return subprocess.run(
                 command,
                 check=False,
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
+
+        try:
+            result = run_connect()
         except (OSError, subprocess.TimeoutExpired) as error:
             self.wifi_connect_finished.emit(False, f"connect failed: {error}")
             return
 
-        output = (result.stdout or result.stderr).strip()
+        output = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()
+
+        # Some NetworkManager versions can leave behind an incomplete Wi-Fi
+        # profile after the first connection attempt.  The next activation then
+        # fails with "802-11-wireless-security.key-mgmt: property is missing".
+        # Recover automatically by deleting ONLY matching Wi-Fi profiles and
+        # letting `nmcli device wifi connect` recreate the profile from the AP.
+        if result.returncode != 0 and "key-mgmt: property is missing" in output.lower():
+            try:
+                profiles = subprocess.run(
+                    [
+                        "nmcli",
+                        "-t",
+                        "-f",
+                        "UUID,TYPE,NAME",
+                        "connection",
+                        "show",
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if profiles.returncode == 0:
+                    for line in profiles.stdout.splitlines():
+                        parts = _split_nmcli_terse(line)
+                        if len(parts) < 3:
+                            continue
+                        uuid, profile_type, name = parts[0], parts[1], parts[2]
+                        if name == ssid and profile_type in {
+                            "802-11-wireless",
+                            "wifi",
+                        }:
+                            subprocess.run(
+                                ["nmcli", "connection", "delete", "uuid", uuid],
+                                check=False,
+                                capture_output=True,
+                                text=True,
+                                timeout=5,
+                            )
+
+                    # Make sure the AP is freshly visible before recreating it.
+                    subprocess.run(
+                        ["nmcli", "device", "wifi", "rescan"],
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                        timeout=8,
+                    )
+                    result = run_connect()
+                    output = (
+                        (result.stderr or "") + "\n" + (result.stdout or "")
+                    ).strip()
+            except (OSError, subprocess.TimeoutExpired):
+                # Fall through and display the original/last NetworkManager
+                # error instead of crashing the UI.
+                pass
+
         if result.returncode == 0:
             self.wifi_connect_finished.emit(True, "connected")
         else:

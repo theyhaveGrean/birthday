@@ -1225,24 +1225,30 @@ class ConfigWidget(QWidget):
 
     def _wifi_key_rows(self):
         return [
-            [*list("1234567890"), "NEXT"],
-            [*list("abcdefghijklmnopqrstuvwxyz"), "NEXT"],
-            [*list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), "NEXT"],
-            [*list("!\"#$%&'()*+"), "NEXT"],
-            [*list(",-./:;<=>?"), "NEXT"],
-            [*list("@[\\]^_`{|}~"), "NEXT"],
-            ["SPACE", "DEL", "CANCEL", "CONNECT"],
+            ["PREV", *list("1234567890"), "NEXT"],
+            ["PREV", *list("abcdefghijklmnopqrstuvwxyz"), "NEXT"],
+            ["PREV", *list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), "NEXT"],
+            ["PREV", *list("!\"#$%&'()*+"), "NEXT"],
+            ["PREV", *list(",-./:;<=>?"), "NEXT"],
+            ["PREV", *list("@[\\]^_`{|}~"), "NEXT"],
+            ["PREV", "SPACE", "DEL", "CANCEL", "CONNECT"],
         ]
 
     def _clamp_wifi_key_col(self):
         row = self._wifi_key_rows()[self.wifi_key_row]
         self.wifi_key_col = min(self.wifi_key_col, len(row) - 1)
 
-    def _advance_wifi_key_row(self):
+    def _change_wifi_key_row(self, delta):
         self.wifi_key_row = (
-            self.wifi_key_row + 1
+            self.wifi_key_row + delta
         ) % len(self._wifi_key_rows())
         self._clamp_wifi_key_col()
+
+    def _advance_wifi_key_row(self):
+        self._change_wifi_key_row(1)
+
+    def _previous_wifi_key_row(self):
+        self._change_wifi_key_row(-1)
 
     def _wifi_choice_count(self):
         return len(self.wifi_networks) + 3
@@ -1459,6 +1465,8 @@ class ConfigWidget(QWidget):
         elif key == "CANCEL":
             self.wifi_stage = "networks"
             self.wifi_password = ""
+        elif key == "PREV":
+            self._previous_wifi_key_row()
         elif key == "NEXT":
             self._advance_wifi_key_row()
         elif key == "CONNECT":
@@ -1951,7 +1959,7 @@ class ConfigWidget(QWidget):
                 row_width = 0
                 widths = []
                 for key in row:
-                    width = 50 if key == "NEXT" else (68 if len(key) > 1 else 19)
+                    width = 50 if key in ("PREV", "NEXT") else (68 if len(key) > 1 else 19)
                     widths.append(width)
                     row_width += width + key_gap
                 row_width -= key_gap
@@ -2032,7 +2040,7 @@ class ConfigWidget(QWidget):
         painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
         painter.setPen(TEXT_DIM)
         footer = (
-            "< / > key   select type   NEXT changes row"
+            "< / > key   select type   PREV/NEXT changes row"
             if self.wifi_stage == "password"
             else "< / > choose   select"
         )
