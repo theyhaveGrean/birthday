@@ -1,0 +1,20 @@
+Dear Autumn,
+
+This is placeholder text for now. It is intentionally long so the message screen can test scrolling.
+
+Line 01: a small archive boots in the dark.
+Line 02: the screen hums, the buttons wait.
+Line 03: every clip is a little saved signal.
+Line 04: every saved signal points back to you.
+Line 05: left and right should move through this note.
+Line 06: select should close it and return to config.
+Line 07: the scrollbar should move as the text moves.
+Line 08: this line exists mostly for testing.
+Line 09: so does this one.
+Line 10: and this one, honestly.
+Line 11: replace all of this with the real note later.
+Line 12: there should still be room for more.
+Line 13: if this appears, scrolling is working.
+Line 14: end of placeholder transmission.
+
+- Adityan

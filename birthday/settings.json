@@ -1,0 +1,5 @@
+{
+  "volume": 100,
+  "sfx_enabled": true,
+  "cloud_message_url": "https://raw.githubusercontent.com/theyhaveGrean/dynamicautumnmessage/main/message.txt"
+}

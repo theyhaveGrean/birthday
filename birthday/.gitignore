@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.cache/
+
+# Runtime / logs
+*.log
+.selected_video
+.cloud_message.txt
+.cloud_message_token
+memos.json
+*.sock
+
+# Editor junk
+.vscode/
+.DS_Store

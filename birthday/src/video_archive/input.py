@@ -1,0 +1,47 @@
+from gpiozero import Button
+from PySide6.QtCore import QObject, Signal
+
+
+class InputController(QObject):
+    left_pressed = Signal()
+    select_pressed = Signal()
+    right_pressed = Signal()
+
+    def __init__(self):
+        super().__init__()
+
+        self.left_button = Button(
+            27,
+            pull_up=True,
+            bounce_time=0.05,
+        )
+
+        self.select_button = Button(
+            17,
+            pull_up=True,
+            bounce_time=0.05,
+        )
+
+        self.right_button = Button(
+            22,
+            pull_up=True,
+            bounce_time=0.05,
+        )
+
+        self.left_button.when_pressed = self._left_pressed
+        self.select_button.when_pressed = self._select_pressed
+        self.right_button.when_pressed = self._right_pressed
+
+    def _left_pressed(self):
+        self.left_pressed.emit()
+
+    def _select_pressed(self):
+        self.select_pressed.emit()
+
+    def _right_pressed(self):
+        self.right_pressed.emit()
+
+    def close(self):
+        self.left_button.close()
+        self.select_button.close()
+        self.right_button.close()
