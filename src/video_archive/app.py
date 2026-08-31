@@ -46,6 +46,61 @@ from .ui import (
 VIDEO_EXTENSIONS = {".mp4", ".mov"}
 CONFIG_TITLE = "APPS"
 MAX_MPV_VOLUME = 150
+CLOUD_POLL_MS = 60000
+CLOUD_RETRY_MS = 15000
+
+
+def _split_nmcli_terse(line):
+    """Split nmcli -t output while honoring its backslash escaping."""
+    fields = []
+    current = []
+    escaped = False
+
+    for char in line:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == ":":
+            fields.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+
+    if escaped:
+        current.append("\\")
+
+    fields.append("".join(current))
+    return fields
+
+
+def _normalize_wifi_security(value):
+    value = (value or "").strip()
+    if value in {"", "--"}:
+        return ""
+    return value
+
+
+def _friendly_nmcli_error(output, default):
+    text = (output or "").strip()
+    lower = text.lower()
+    permission_markers = (
+        "not authorized",
+        "not authorised",
+        "insufficient privileges",
+        "permission denied",
+        "authorization",
+        "authorisation",
+        "polkit",
+    )
+    if any(marker in lower for marker in permission_markers):
+        return "WIFI PERMISSION ERROR"
+    if "networkmanager is not running" in lower:
+        return "NETWORKMANAGER OFFLINE"
+    if "nmcli" in lower and "not found" in lower:
+        return "NMCLI NOT FOUND"
+    return text[-80:] if text else default
 
 
 def load_videos():
@@ -589,6 +644,7 @@ class VideoArchiveWindow(QMainWindow):
     wifi_status_finished = Signal(object)
     wifi_disconnect_finished = Signal(bool, str)
     cloud_message_finished = Signal(str, str)
+    reboot_finished = Signal(bool, str)
 
     def __init__(self):
         super().__init__()
@@ -600,6 +656,10 @@ class VideoArchiveWindow(QMainWindow):
         self.memo_date = load_cached_message_date()
         self.memos = load_memos()
         self.unread_memos = unread_memo_count(self.memos)
+        self.cloud_status = (
+            "CHECKING" if self.settings.get("cloud_message_url") else "DISABLED"
+        )
+        self.cloud_error = ""
 
         # Preserve the actual extension in the gallery:
         # AUTUMN.mp4, TRIP.mov, etc.
@@ -649,6 +709,7 @@ class VideoArchiveWindow(QMainWindow):
         self.gallery = GalleryWidget(
             self.gallery_titles,
             self.unread_memos,
+            self.cloud_status,
         )
 
         self.config_page = ConfigWidget(
@@ -660,6 +721,7 @@ class VideoArchiveWindow(QMainWindow):
             self.settings["sfx_enabled"],
         )
         self.config_page.set_read_memo_keys(load_read_memo_keys())
+        self.config_page.set_cloud_status(self.cloud_status, self.cloud_error)
 
         self.playback_page = PlaybackPage()
 
@@ -724,6 +786,10 @@ class VideoArchiveWindow(QMainWindow):
 
         self.config_page.reboot_requested.connect(
             self._reboot_system
+        )
+
+        self.reboot_finished.connect(
+            self._reboot_finished
         )
 
         self.config_page.volume_changed.connect(
@@ -802,6 +868,10 @@ class VideoArchiveWindow(QMainWindow):
             self._physical_select
         )
 
+        self.input_controller.select_held.connect(
+            self._physical_select_held
+        )
+
         self.input_controller.right_pressed.connect(
             self._physical_right
         )       
@@ -811,7 +881,7 @@ class VideoArchiveWindow(QMainWindow):
             self._refresh_cloud_message
         )
         if self.settings["cloud_message_url"]:
-            self.cloud_message_timer.start(60000)
+            self.cloud_message_timer.start(CLOUD_POLL_MS)
             QTimer.singleShot(3000, self._refresh_cloud_message)
 
     def _physical_left(self):
@@ -848,6 +918,19 @@ class VideoArchiveWindow(QMainWindow):
             self.audio.play("select")
             self.config_page.select()
 
+
+    def _physical_select_held(self):
+        if (
+            self.mode == "config"
+            and self.config_page.showing_memos
+            and not self.config_page.memo_reading
+        ):
+            self.audio.play("select")
+            self.config_page.hold_select()
+        else:
+            # Outside the memo list, holding Select behaves like a normal
+            # Select so an accidental long press never becomes a dead input.
+            self._physical_select()
 
     def _physical_right(self):
         if self.mode == "start":
@@ -960,6 +1043,7 @@ class VideoArchiveWindow(QMainWindow):
         self.config_page.set_note(self.note)
         self.config_page.set_memo(self.memo, self.memo_date)
         self.config_page.set_memos(self.memos)
+        self.config_page.set_cloud_status(self.cloud_status, self.cloud_error)
         self.config_page.set_volume(self.settings["volume"])
         self.config_page.set_sfx_enabled(
             self.settings["sfx_enabled"]
@@ -1004,6 +1088,10 @@ class VideoArchiveWindow(QMainWindow):
         if not url or self.cloud_message_running:
             return
 
+        self.cloud_status = "CHECKING"
+        self.cloud_error = ""
+        self.gallery.set_cloud_status(self.cloud_status)
+        self.config_page.set_cloud_status(self.cloud_status)
         self.cloud_message_running = True
         thread = threading.Thread(
             target=self._cloud_message_worker,
@@ -1018,6 +1106,7 @@ class VideoArchiveWindow(QMainWindow):
 
     def _cloud_message_finished(self, message, error):
         self.cloud_message_running = False
+
         if message:
             self.memo = message
             self.memo_date = load_cached_message_date()
@@ -1027,11 +1116,24 @@ class VideoArchiveWindow(QMainWindow):
             self.config_page.set_memo(message, self.memo_date)
             self.config_page.set_memos(self.memos)
             self.config_page.set_read_memo_keys(load_read_memo_keys())
-        elif error:
+
+        if error:
+            self.cloud_status = "OFFLINE" if not message else "ERROR"
+            self.cloud_error = error
+            # Retry more aggressively while unavailable. Once a fetch
+            # succeeds, the normal one-minute polling cadence resumes.
+            self.cloud_message_timer.setInterval(CLOUD_RETRY_MS)
             print(
                 f"cloud message fetch failed: {error}",
                 flush=True,
             )
+        else:
+            self.cloud_status = "SYNCED"
+            self.cloud_error = ""
+            self.cloud_message_timer.setInterval(CLOUD_POLL_MS)
+
+        self.gallery.set_cloud_status(self.cloud_status)
+        self.config_page.set_cloud_status(self.cloud_status, self.cloud_error)
 
     def _scan_wifi(self):
         self._refresh_wifi_status()
@@ -1081,22 +1183,24 @@ class VideoArchiveWindow(QMainWindow):
             output = (result.stderr or result.stdout).strip()
             self.wifi_scan_finished.emit(
                 [],
-                output[-80:] if output else "wifi scan failed"
+                _friendly_nmcli_error(output, "wifi scan failed"),
             )
             return
 
         networks = []
         seen = set()
         for line in result.stdout.splitlines():
-            parts = line.split(":")
+            parts = _split_nmcli_terse(line)
             if not parts:
                 continue
 
-            ssid = parts[0].replace(r"\:", ":").strip()
+            ssid = parts[0].strip()
             if not ssid or ssid in seen:
                 continue
 
-            security = parts[1].strip() if len(parts) > 1 else ""
+            security = _normalize_wifi_security(
+                parts[1] if len(parts) > 1 else ""
+            )
             signal = parts[2].strip() if len(parts) > 2 else ""
             networks.append(
                 {
@@ -1155,14 +1259,14 @@ class VideoArchiveWindow(QMainWindow):
 
         wifi_device = ""
         for line in status.stdout.splitlines():
-            parts = line.split(":")
+            parts = _split_nmcli_terse(line)
             if len(parts) < 4 or parts[1] != "wifi":
                 continue
 
             wifi_device = parts[0]
             current["device"] = wifi_device
             if parts[2] == "connected":
-                current["ssid"] = parts[3].replace(r"\:", ":")
+                current["ssid"] = parts[3]
             break
 
         if wifi_device:
@@ -1243,13 +1347,15 @@ class VideoArchiveWindow(QMainWindow):
         else:
             self.wifi_connect_finished.emit(
                 False,
-                output[-80:] if output else "connect failed",
+                _friendly_nmcli_error(output, "connect failed"),
             )
 
     def _wifi_connect_finished(self, connected, status):
         self.wifi_connect_running = False
         self.config_page.set_wifi_status(status)
         self._refresh_wifi_status()
+        if connected and self.settings.get("cloud_message_url"):
+            QTimer.singleShot(500, self._refresh_cloud_message)
 
     def _disconnect_wifi(self):
         if self.wifi_disconnect_running:
@@ -1285,7 +1391,7 @@ class VideoArchiveWindow(QMainWindow):
         else:
             self.wifi_disconnect_finished.emit(
                 False,
-                output[-80:] if output else "disconnect failed",
+                _friendly_nmcli_error(output, "disconnect failed"),
             )
 
     def _wifi_disconnect_finished(self, disconnected, status):
@@ -1303,9 +1409,56 @@ class VideoArchiveWindow(QMainWindow):
 
     def _reboot_system(self):
         self.audio.play("select")
-        self.player.stop(silent=True)
-        subprocess.Popen(["sudo", "reboot"])
-        QApplication.quit()
+        self.config_page.set_reboot_status("rebooting...")
+        threading.Thread(
+            target=self._reboot_worker,
+            daemon=True,
+        ).start()
+
+    def _reboot_worker(self):
+        commands = (
+            ["systemctl", "reboot"],
+            ["sudo", "-n", "systemctl", "reboot"],
+        )
+        errors = []
+
+        for command in commands:
+            try:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                errors.append(str(exc))
+                continue
+
+            if result.returncode == 0:
+                # Do not quit Qt ourselves.  A successful system reboot will
+                # terminate X and the application.  This avoids leaving the
+                # user at a blank X root window if reboot authorization fails.
+                return
+
+            error = (result.stderr or result.stdout or "").strip()
+            if error:
+                errors.append(error)
+
+        message = "reboot permission denied"
+        combined = " ".join(errors).lower()
+        if combined and not any(
+            token in combined
+            for token in ("permission", "authentication", "password", "polkit")
+        ):
+            message = "reboot command failed"
+        self.reboot_finished.emit(False, message)
+
+    def _reboot_finished(self, success, status):
+        if success:
+            return
+        self.config_page.confirming_reboot = False
+        self.config_page.set_reboot_status(status)
 
     def _mpv_ready(self):
         print(

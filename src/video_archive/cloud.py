@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -16,6 +17,7 @@ from .storage import atomic_write_json, atomic_write_text
 MAX_MESSAGE_CHARS = 1200
 FETCH_TIMEOUT_SECONDS = 6
 MAX_MEMOS = 100
+MIN_SANE_YEAR = 2020
 
 
 def memo_key(memo):
@@ -79,20 +81,40 @@ def load_cached_message():
         return ""
 
 
+def _format_sane_datetime(value):
+    if not value or value.year < MIN_SANE_YEAR:
+        return "TIME UNSYNCED"
+    return value.astimezone().strftime("%Y-%m-%d %H:%M") if value.tzinfo else value.strftime("%Y-%m-%d %H:%M")
+
+
 def load_cached_message_date():
     if not CLOUD_MESSAGE_FILE.exists():
         return ""
 
     try:
         timestamp = CLOUD_MESSAGE_FILE.stat().st_mtime
-    except OSError:
+        value = datetime.fromtimestamp(timestamp)
+    except (OSError, ValueError, OverflowError):
         return ""
 
-    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+    formatted = _format_sane_datetime(value)
+    return formatted if formatted != "TIME UNSYNCED" else formatted
 
 
-def _memo_timestamp():
-    return datetime.now().strftime("%Y-%m-%d %H:%M")
+def _memo_timestamp(value=None):
+    return _format_sane_datetime(value or datetime.now())
+
+
+def _response_timestamp(response):
+    # Prefer the server's HTTP Date header. This avoids bogus 1970-era
+    # timestamps when a Raspberry Pi boots before NTP has synchronized.
+    raw_date = response.headers.get("Date", "").strip()
+    if raw_date:
+        try:
+            return _memo_timestamp(parsedate_to_datetime(raw_date))
+        except (TypeError, ValueError, OverflowError):
+            pass
+    return _memo_timestamp()
 
 
 def load_memos():
@@ -104,14 +126,16 @@ def load_memos():
             loaded = []
 
         if isinstance(loaded, list):
+            seen_messages = set()
             for item in loaded:
                 if not isinstance(item, dict):
                     continue
 
                 message = str(item.get("message", "")).strip()
-                if not message:
+                if not message or message in seen_messages:
                     continue
 
+                seen_messages.add(message)
                 memos.append(
                     {
                         "date": str(item.get("date", "")).strip() or "--",
@@ -143,19 +167,22 @@ def save_memos(memos):
     prune_read_memo_keys(memos)
 
 
-def archive_memo(message):
+def archive_memo(message, memo_date=None):
     message = message.strip()
     if not message:
         return load_memos()
 
     memos = load_memos()
-    if memos and memos[0]["message"] == message:
+    # Content is the identity of a cloud memo. If the endpoint returns the
+    # same payload repeatedly (or returns to an older payload), do not create
+    # another archive entry or re-trigger the unread notification.
+    if any(item.get("message", "") == message for item in memos):
         return memos
 
     memos.insert(
         0,
         {
-            "date": _memo_timestamp(),
+            "date": memo_date or _memo_timestamp(),
             "message": message,
         },
     )
@@ -197,6 +224,7 @@ def fetch_cloud_message(url):
     try:
         with urlopen(request, timeout=FETCH_TIMEOUT_SECONDS) as response:
             raw = response.read(MAX_MESSAGE_CHARS + 1)
+            received_at = _response_timestamp(response)
     except (OSError, URLError) as error:
         return None, str(error)
 
@@ -205,8 +233,8 @@ def fetch_cloud_message(url):
         message = message[:MAX_MESSAGE_CHARS].rstrip()
 
     try:
+        archive_memo(message, memo_date=received_at)
         save_cached_message(message)
-        archive_memo(message)
     except OSError as error:
         return message, str(error)
 

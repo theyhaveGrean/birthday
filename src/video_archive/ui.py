@@ -351,12 +351,13 @@ class StartScreenWidget(QWidget):
 class GalleryWidget(QWidget):
     play_requested = Signal(int)
 
-    def __init__(self, titles, unread_memo_count=0):
+    def __init__(self, titles, unread_memo_count=0, cloud_status="DISABLED"):
         super().__init__()
 
         self.titles = titles
         self.selected_index = 0
         self.unread_memo_count = max(0, int(unread_memo_count))
+        self.cloud_status = str(cloud_status or "DISABLED").upper()
 
         self.animation_direction = 0
         self.animation_step = 0
@@ -453,6 +454,10 @@ class GalleryWidget(QWidget):
 
     def set_unread_memo_count(self, count):
         self.unread_memo_count = max(0, int(count))
+        self.update()
+
+    def set_cloud_status(self, status):
+        self.cloud_status = str(status or "DISABLED").upper()
         self.update()
 
     # =====================================================
@@ -672,13 +677,28 @@ class GalleryWidget(QWidget):
         painter.drawText(
             QRect(
                 self.width() - 300,
-                55,
+                48,
                 240,
-                35,
+                26,
             ),
             Qt.AlignRight
             | Qt.AlignVCenter,
             "LOCAL // READY",
+        )
+
+        cloud_color = (
+            GREEN_MAIN
+            if self.cloud_status == "SYNCED"
+            else GREEN_BRIGHT
+            if self.cloud_status == "CHECKING"
+            else TEXT_DIM
+        )
+        painter.setPen(cloud_color)
+        painter.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
+        painter.drawText(
+            QRect(self.width() - 300, 72, 240, 22),
+            Qt.AlignRight | Qt.AlignVCenter,
+            f"CLOUD // {self.cloud_status}",
         )
 
         painter.setPen(
@@ -1107,6 +1127,7 @@ class ConfigWidget(QWidget):
         self.showing_memos = False
         self.editing_volume = False
         self.confirming_reboot = False
+        self.reboot_status = ""
         self.showing_wifi = False
         self.wifi_stage = "networks"
         self.wifi_networks = []
@@ -1116,6 +1137,8 @@ class ConfigWidget(QWidget):
         self.wifi_key_col = 0
         self.wifi_status = "select to scan networks"
         self.wifi_current = {}
+        self.cloud_status = "DISABLED"
+        self.cloud_error = ""
         self.info_scroll = 0
         self.memo_scroll = 0
         self.flicker_phase = 0
@@ -1173,8 +1196,17 @@ class ConfigWidget(QWidget):
         self.wifi_status = status
         self.update()
 
+    def set_reboot_status(self, status):
+        self.reboot_status = str(status or "").strip()
+        self.update()
+
     def set_wifi_current(self, current):
         self.wifi_current = current or {}
+        self.update()
+
+    def set_cloud_status(self, status, error=""):
+        self.cloud_status = str(status or "DISABLED").upper()
+        self.cloud_error = str(error or "").strip()
         self.update()
 
     def set_wifi_networks(self, networks):
@@ -1222,11 +1254,9 @@ class ConfigWidget(QWidget):
             if self.memo_reading:
                 self.memo_scroll = max(0, self.memo_scroll - 1)
             elif self.memos:
-                # Include a BACK item after the memo list so the physical
-                # left/right/select controls can leave this page.
                 self.memo_selected_index = (
                     self.memo_selected_index - 1
-                ) % (len(self.memos) + 1)
+                ) % len(self.memos)
                 self.memo_scroll = 0
         elif self.showing_wifi:
             if self.wifi_stage == "password":
@@ -1258,11 +1288,9 @@ class ConfigWidget(QWidget):
             if self.memo_reading:
                 self.memo_scroll += 1
             elif self.memos:
-                # Include a BACK item after the memo list so the physical
-                # left/right/select controls can leave this page.
                 self.memo_selected_index = (
                     self.memo_selected_index + 1
-                ) % (len(self.memos) + 1)
+                ) % len(self.memos)
                 self.memo_scroll = 0
         elif self.showing_wifi:
             if self.wifi_stage == "password":
@@ -1296,18 +1324,11 @@ class ConfigWidget(QWidget):
                 self.memo_reading = False
                 self.memo_scroll = 0
             elif self.memos:
-                if self.memo_selected_index == len(self.memos):
-                    self.showing_memos = False
-                    self.memo_selected_index = 0
-                    self.memo_scroll = 0
-                else:
-                    self.memo_reading = True
-                    self.memo_scroll = 0
-                    self.memo_read.emit(
-                        self.memos[self.memo_selected_index]
-                    )
-            else:
-                self.showing_memos = False
+                self.memo_reading = True
+                self.memo_scroll = 0
+                self.memo_read.emit(
+                    self.memos[self.memo_selected_index]
+                )
         elif self.showing_wifi:
             self._select_wifi()
         elif self.app_mode == "apps":
@@ -1335,6 +1356,7 @@ class ConfigWidget(QWidget):
             self.sfx_enabled = not self.sfx_enabled
             self.sfx_changed.emit(self.sfx_enabled)
         elif self.selected_index == 3:
+            self.reboot_status = ""
             if self.confirming_reboot:
                 self.reboot_requested.emit()
             else:
@@ -1342,6 +1364,16 @@ class ConfigWidget(QWidget):
         else:
             self.app_mode = "apps"
         self.update()
+
+    def hold_select(self):
+        # On the memo list, a long Select press is the dedicated Back
+        # gesture. While reading a memo, a normal short Select returns to
+        # the list, so a hold intentionally does nothing there.
+        if self.showing_memos and not self.memo_reading:
+            self.showing_memos = False
+            self.memo_selected_index = 0
+            self.memo_scroll = 0
+            self.update()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key_Left:
@@ -1649,17 +1681,12 @@ class ConfigWidget(QWidget):
                 }
             ]
 
-        back_selected = bool(memos) and self.memo_selected_index == len(memos)
         selected_memo = (
             memos[self.memo_selected_index]
-            if memos and not back_selected
+            if memos
             else {
                 "date": "--",
-                "message": (
-                    "Press SELECT to return to APPS."
-                    if back_selected
-                    else "No cloud memo received yet."
-                ),
+                "message": "",
             }
         )
         memo = selected_memo["message"]
@@ -1691,12 +1718,24 @@ class ConfigWidget(QWidget):
             "MEMOS",
         )
 
+        painter.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        painter.setPen(
+            GREEN_MAIN if self.cloud_status == "SYNCED"
+            else GREEN_BRIGHT if self.cloud_status == "CHECKING"
+            else TEXT_DIM
+        )
+        painter.drawText(
+            panel.adjusted(30, 24, -30, -24),
+            Qt.AlignRight | Qt.AlignTop,
+            f"CLOUD // {self.cloud_status}",
+        )
+
         painter.setPen(GREEN_DIM)
         painter.drawLine(left.right() + 14, left.top(), left.right() + 14, left.bottom())
 
         painter.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         metrics = painter.fontMetrics()
-        memo_rows = list(memos) + ([{"date": "< BACK", "message": ""}] if memos else [])
+        memo_rows = list(memos)
         visible_memos = max(1, left.height() // 42)
         start = max(
             0,
@@ -1721,13 +1760,10 @@ class ConfigWidget(QWidget):
                 date,
             )
             painter.setPen(GREEN_MAIN if selected else TEXT_DIM)
-            if index == len(memos):
-                row_label = "RETURN TO APPS"
-            else:
-                unread = memo_key(item) not in self.read_memo_keys
-                row_label = "!! NEW MEMO !!" if unread else "PRIVATE MEMO"
-                if unread:
-                    painter.setPen(GREEN_BRIGHT)
+            unread = memo_key(item) not in self.read_memo_keys
+            row_label = "!! NEW MEMO !!" if unread else "PRIVATE MEMO"
+            if unread:
+                painter.setPen(GREEN_BRIGHT)
             painter.drawText(
                 QRect(left.left(), y + 17, left.width(), 16),
                 Qt.AlignLeft | Qt.AlignVCenter,
@@ -1738,6 +1774,23 @@ class ConfigWidget(QWidget):
         painter.setPen(TEXT_MAIN)
         metrics = painter.fontMetrics()
         line_height = metrics.lineSpacing()
+
+        if not memos:
+            if self.cloud_status == "OFFLINE":
+                memo = "NO MEMOS // CLOUD OFFLINE\n\nRETRYING AUTOMATICALLY"
+                if self.cloud_error:
+                    detail = metrics.elidedText(
+                        self.cloud_error, Qt.ElideRight, max(1, right.width() - 16)
+                    )
+                    memo += f"\n\n{detail}"
+            elif self.cloud_status == "ERROR":
+                memo = "NO MEMOS // CLOUD ERROR\n\nRETRYING AUTOMATICALLY"
+            elif self.cloud_status == "CHECKING":
+                memo = "NO MEMOS YET\n\nCHECKING CLOUD..."
+            elif self.cloud_status == "DISABLED":
+                memo = "NO MEMOS YET\n\nCLOUD NOT CONFIGURED"
+            else:
+                memo = "NO MEMOS YET\n\nCLOUD CONNECTED"
 
         # Wrap memo paragraphs to the actual pixel width of the reader.
         # Previously scrolling only worked when the message itself contained
@@ -1815,7 +1868,7 @@ class ConfigWidget(QWidget):
                 f"   {scroll_state}   select list"
             )
         else:
-            mode_text = "< / > memo/back   select open"
+            mode_text = "< / > memo   select open   HOLD select: back"
         painter.drawText(
             panel.adjusted(30, 0, -30, -24),
             Qt.AlignLeft | Qt.AlignBottom,
@@ -2147,6 +2200,8 @@ class ConfigWidget(QWidget):
                     if self.sfx_enabled
                     else "sound effects muted"
                 )
+            elif self.selected_index == 3 and self.reboot_status:
+                detail_text = self.reboot_status
             elif self.selected_index == 3 and self.confirming_reboot:
                 detail_text = "are you sure you want to reboot?"
             elif self.selected_index == 3:
@@ -2213,9 +2268,13 @@ class ConfigWidget(QWidget):
                 painter.drawText(
                     detail.adjusted(0, 120, 0, 0),
                     Qt.AlignLeft | Qt.AlignTop,
-                    "SELECT TO CONFIRM"
-                    if self.confirming_reboot
-                    else "WAITING",
+                    (
+                        "REBOOT FAILED"
+                        if self.reboot_status
+                        else "SELECT TO CONFIRM"
+                        if self.confirming_reboot
+                        else "WAITING"
+                    ),
                 )
 
         painter.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
