@@ -4,7 +4,9 @@ import os
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from urllib.error import URLError
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
+import uuid
 
 from .config import (
     CLOUD_MEMOS_FILE,
@@ -208,16 +210,42 @@ def load_cloud_message_token():
         return ""
 
 
+def _fresh_fetch_url(url):
+    """Bypass intermediary caches for GitHub raw content.
+
+    The app uses raw.githubusercontent.com for memo delivery. A successful
+    HTTP request can otherwise still return a recently cached version of the
+    file. A unique query value forces each poll to be a distinct CDN request.
+    Other endpoints are left unchanged so arbitrary configured APIs do not
+    receive an unexpected query parameter.
+    """
+    parts = urlsplit(url)
+    if parts.hostname != "raw.githubusercontent.com":
+        return url
+
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    query.append(("_memo_poll", uuid.uuid4().hex))
+    return urlunsplit((
+        parts.scheme,
+        parts.netloc,
+        parts.path,
+        urlencode(query),
+        parts.fragment,
+    ))
+
+
 def fetch_cloud_message(url):
     headers = {
         "User-Agent": "4autumn-video-archive/1.0",
+        "Cache-Control": "no-cache, no-store, max-age=0",
+        "Pragma": "no-cache",
     }
     token = load_cloud_message_token()
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
     request = Request(
-        url,
+        _fresh_fetch_url(url),
         headers=headers,
     )
 
