@@ -4,6 +4,6 @@
   "memo_chime_enabled": true,
   "wake_on_memo": true,
   "brightness": 35,
-  "sleep_timeout_minutes": 5,
+  "sleep_timeout_minutes": 1,
   "cloud_message_url": "https://raw.githubusercontent.com/theyhaveGrean/dynamicautumnmessage/main/message.txt"
 }

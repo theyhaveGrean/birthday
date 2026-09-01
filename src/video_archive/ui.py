@@ -489,11 +489,17 @@ class HomeWidget(QWidget):
         painter.setFont(QFont("DejaVu Sans Mono", 17, QFont.Bold))
         painter.setPen(GREEN_MAIN)
         painter.drawText(60, 82, "4AUTUMN.EXE // HOME")
-        painter.setPen(TEXT_DIM)
+        right_status = "LOCAL // HOME"
+        right_color = TEXT_DIM
+        if self.unread_memo_count:
+            count_text = "9+" if self.unread_memo_count > 9 else str(self.unread_memo_count)
+            right_status = f"MEMO // {count_text} NEW"
+            right_color = RED_BRIGHT
+        painter.setPen(right_color)
         painter.drawText(
             QRect(self.width() - 330, 55, 270, 35),
             Qt.AlignRight | Qt.AlignVCenter,
-            "LOCAL // HOME",
+            right_status,
         )
         painter.setPen(GREEN_DIM)
         painter.drawLine(60, 105, self.width() - 60, 105)
@@ -513,7 +519,10 @@ class HomeWidget(QWidget):
         content_bottom = self.height() - 105
         detail = QRect(455, detail_top, self.width() - 565, content_bottom - detail_top)
 
-        values = ("MAIN", "", "")
+        memo_value = ""
+        if self.unread_memo_count:
+            memo_value = "NEW" if self.unread_memo_count == 1 else f"{self.unread_memo_count} NEW"
+        values = ("MAIN", memo_value, "")
         for index, label in enumerate(HOME_APPS):
             rect = QRect(
                 menu_left,
@@ -534,6 +543,20 @@ class HomeWidget(QWidget):
         ]
         if self.unread_memo_count:
             detail_texts[1] += f"\n{self.unread_memo_count} UNREAD"
+
+        if self.unread_memo_count and self.selected_index != 1:
+            alert = QRect(detail.left(), detail.bottom() - 46, detail.width(), 34)
+            painter.fillRect(alert, RED_BG)
+            painter.setPen(QPen(RED_BRIGHT, 2))
+            painter.drawRect(alert)
+            painter.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
+            painter.setPen(RED_BRIGHT)
+            notice_text = (
+                "NEW MEMO // OPEN MEMOS"
+                if self.unread_memo_count == 1
+                else f"{self.unread_memo_count} NEW MEMOS // OPEN MEMOS"
+            )
+            painter.drawText(alert.adjusted(12, 0, -12, 0), Qt.AlignLeft | Qt.AlignVCenter, notice_text)
 
         painter.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
         painter.setPen(GREEN_BRIGHT)
