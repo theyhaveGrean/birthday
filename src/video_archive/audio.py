@@ -12,9 +12,8 @@ from .config import SOUND_DIR
 from .storage import clamp_int
 
 SAMPLE_RATE = 22050
-RETURN_FLICKER_DURATION = 0.11
 MAX_SFX_VOLUME = 150
-SOUND_SCHEMA_VERSION = "2"
+SOUND_SCHEMA_VERSION = "3"
 
 
 class AudioController:
@@ -192,6 +191,7 @@ class AudioController:
             "select": ((300, 0.035), (560, 0.045), (840, 0.035)),
             "notify": ((660, 0.045), (990, 0.060)),
             "load": ((180, 0.045), (120, 0.03), (500, 0.04)),
+            "return": ((740, 0.035), (520, 0.035), (300, 0.055)),
             "error": ((130, 0.12),),
         }
 
@@ -200,28 +200,6 @@ class AudioController:
             if not path.exists():
                 self._write_tones(path, tones)
             self.sounds[name] = path
-
-        return_path = SOUND_DIR / "return.wav"
-        if not self._is_return_flicker(return_path):
-            self._write_return_flicker(return_path)
-        self.sounds["return"] = return_path
-
-    def _is_return_flicker(self, path):
-        if not path.exists():
-            return False
-
-        try:
-            with wave.open(str(path), "rb") as wav_file:
-                return (
-                    wav_file.getnchannels() == 1
-                    and wav_file.getsampwidth() == 2
-                    and wav_file.getframerate() == SAMPLE_RATE
-                    and wav_file.getnframes()
-                    == int(SAMPLE_RATE * RETURN_FLICKER_DURATION)
-                )
-        except wave.Error:
-            return False
-
     def _write_tones(self, path, tones):
         samples = []
 
@@ -233,44 +211,6 @@ class AudioController:
                 samples.append(int(value * fade * 9000))
 
             samples.extend([0] * int(SAMPLE_RATE * 0.012))
-
-        with wave.open(str(path), "wb") as wav_file:
-            wav_file.setnchannels(1)
-            wav_file.setsampwidth(2)
-            wav_file.setframerate(SAMPLE_RATE)
-            wav_file.writeframes(
-                b"".join(struct.pack("<h", sample) for sample in samples)
-            )
-
-    def _write_return_flicker(self, path):
-        count = int(SAMPLE_RATE * RETURN_FLICKER_DURATION)
-        samples = []
-        seed = 0x4C434348
-        last_raw = 0.0
-        filtered = 0.0
-
-        for index in range(count):
-            progress = index / max(1, count - 1)
-
-            seed = (seed * 1664525 + 1013904223) & 0xFFFFFFFF
-            raw = ((seed >> 16) & 0xFFFF) / 32767.5 - 1.0
-
-            high_passed = raw - last_raw
-            last_raw = raw
-            filtered = filtered * 0.64 + high_passed * 0.36
-
-            attack = min(index / 90, 1.0)
-            decay = (1.0 - progress) ** 2.4
-            envelope = attack * decay
-
-            if progress > 0.82:
-                envelope *= 0.25
-
-            waveform = filtered
-
-            samples.append(
-                int(waveform * envelope * 6500)
-            )
 
         with wave.open(str(path), "wb") as wav_file:
             wav_file.setnchannels(1)

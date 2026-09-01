@@ -307,48 +307,55 @@ class StartScreenWidget(QWidget):
             draw_static_slices(painter, self.width(), self.height(), self.flicker_phase)
         apply_text_flicker(painter, self.text_flicker, self.flicker_phase)
 
-        title_font = QFont("DejaVu Sans Mono", 46, QFont.Bold)
-        draw_text_glow(
-            painter,
-            QRect(70, 112, self.width() - 140, 82),
-            Qt.AlignCenter,
-            "4AUTUMN.EXE",
-            title_font,
-            GREEN_BRIGHT,
-            GREEN_DIM,
-        )
+        painter.setFont(QFont("DejaVu Sans Mono", 17, QFont.Bold))
+        painter.setPen(GREEN_MAIN)
+        painter.drawText(60, 82, "4AUTUMN.EXE // BOOT")
 
         painter.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
         painter.setPen(TEXT_DIM)
         painter.drawText(
-            QRect(self.width() - 300, 55, 240, 35),
+            QRect(self.width() - 330, 55, 270, 35),
             Qt.AlignRight | Qt.AlignVCenter,
-            "STANDBY // READY",
+            "LOCAL // BOOT",
         )
 
         painter.setPen(GREEN_DIM)
-        painter.drawLine(60, 210, self.width() - 60, 210)
+        painter.drawLine(60, 105, self.width() - 60, 105)
+        painter.drawLine(
+            60,
+            self.height() - 75,
+            self.width() - 60,
+            self.height() - 75,
+        )
 
         pulse_on = self.flicker_phase % 18 < 12
+        menu_left = 118
+        content_top = 160
+        content_bottom = self.height() - 105
+        detail = QRect(455, content_top, self.width() - 565, content_bottom - content_top)
+        painter.setPen(GREEN_DIM)
+        painter.drawLine(410, content_top, 410, content_bottom)
 
         if self.boot_complete:
-            prompt_font = QFont("DejaVu Sans Mono", 32, QFont.Bold)
-            draw_text_glow(
-                painter,
-                QRect(80, self.height() // 2 + 10, self.width() - 160, 70),
-                Qt.AlignCenter,
-                "PRESS ANY BUTTON TO START",
-                prompt_font,
-                GREEN_BRIGHT if pulse_on else GREEN_MAIN,
-                GREEN_DIM,
+            painter.fillRect(menu_left, content_top + 6, 6, 48, GREEN_BRIGHT)
+            painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
+            painter.setPen(GREEN_BRIGHT if pulse_on else GREEN_MAIN)
+            painter.drawText(
+                QRect(menu_left + 24, content_top, 260, 60),
+                Qt.AlignLeft | Qt.AlignVCenter,
+                "START",
             )
 
-            painter.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+            painter.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
+            painter.setPen(GREEN_BRIGHT)
+            painter.drawText(detail, Qt.AlignLeft | Qt.AlignTop, "ARCHIVE READY")
+
+            painter.setFont(QFont("DejaVu Sans Mono", 16, QFont.Bold))
             painter.setPen(TEXT_DIM)
             painter.drawText(
-                QRect(80, self.height() // 2 + 83, self.width() - 160, 30),
-                Qt.AlignCenter,
-                "ARCHIVE AWAITING INPUT  []",
+                detail.adjusted(0, 58, 0, 0),
+                Qt.AlignLeft | Qt.AlignTop,
+                "PRESS ANY BUTTON TO START\nSYSTEM STANDBY // INPUT ARMED",
             )
 
         else:
@@ -361,22 +368,35 @@ class StartScreenWidget(QWidget):
                 color = TEXT_MAIN if index == visible_boot_lines - 1 else TEXT_DIM
                 painter.setPen(color)
                 painter.drawText(
-                    QRect(120, 250 + index * 30, self.width() - 240, 24),
+                    QRect(menu_left + 24, content_top + index * 32, 270, 26),
                     Qt.AlignLeft | Qt.AlignVCenter,
                     line,
                 )
 
+            painter.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
+            painter.setPen(GREEN_BRIGHT)
+            painter.drawText(detail, Qt.AlignLeft | Qt.AlignTop, "BOOT SEQUENCE")
+
+            painter.setFont(QFont("DejaVu Sans Mono", 16, QFont.Bold))
+            painter.setPen(TEXT_DIM)
+            painter.drawText(
+                detail.adjusted(0, 58, 0, 0),
+                Qt.AlignLeft | Qt.AlignTop,
+                "MOUNTING LOCAL ARCHIVE\nWAITING FOR VIDEO BUS",
+            )
+
             progress_width = min(
-                self.width() - 240,
-                int((self.width() - 240) * min(self.boot_tick, 55) / 55),
+                detail.width(),
+                int(detail.width() * min(self.boot_tick, 55) / 55),
             )
             painter.setPen(GREEN_DIM)
-            painter.drawRect(120, self.height() - 110, self.width() - 240, 12)
+            progress = QRect(detail.left(), detail.top() + 145, detail.width(), 14)
+            painter.drawRect(progress)
             painter.fillRect(
-                122,
-                self.height() - 108,
+                progress.left() + 2,
+                progress.top() + 2,
                 max(1, progress_width - 4),
-                8,
+                progress.height() - 4,
                 GREEN_MAIN if pulse_on else GREEN_MUTED,
             )
 
@@ -3037,23 +3057,28 @@ class TransitionWidget(QWidget):
                 BG_STRIPE,
             )
 
-        # Quick signal-acquisition flicker, kept deliberately faint.
-        draw_signal_acquisition_flicker(
-            painter,
-            self.width(),
-            self.height(),
-            self.frame,
-            intro_only=True,
-        )
-
         draw_global_flicker(painter, self.width(), self.height(), self.frame)
-        draw_tracking_glitch(painter, self.width(), self.height(), self.frame % 32)
-        draw_random_screen_flicker(
-            painter,
-            self.width(),
-            self.height(),
-            self.frame,
-        )
+        if self.mode == "play":
+            # Loading keeps the signal-acquisition/static language.
+            draw_signal_acquisition_flicker(
+                painter,
+                self.width(),
+                self.height(),
+                self.frame,
+                intro_only=True,
+            )
+            draw_tracking_glitch(
+                painter,
+                self.width(),
+                self.height(),
+                self.frame % 32,
+            )
+            draw_random_screen_flicker(
+                painter,
+                self.width(),
+                self.height(),
+                self.frame,
+            )
 
         # Same frame language as the gallery.
         pen = QPen(GREEN_MUTED)
@@ -3085,8 +3110,8 @@ class TransitionWidget(QWidget):
             main_text = prefix + display_title
             sub_text = "TRACKING / SYNC / FIELD LOCK"
         else:
-            main_text = "SIGNAL // RESTORED"
-            sub_text = "REWIND BUFFER CLEAR"
+            main_text = "RETURNING // GALLERY"
+            sub_text = "EXIT SIGNAL CONFIRMED"
 
         main_rect = QRect(
             80,

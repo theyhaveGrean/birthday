@@ -2493,7 +2493,7 @@ class VideoArchiveWindow(QMainWindow):
                 self.pending_index
             ]
 
-        # Cover the last video frame before anything else changes.
+        # End playback with audio feedback only; no static return overlay.
         self.playback_page.show_transition_return(
             title
         )
