@@ -2319,8 +2319,8 @@ class VideoArchiveWindow(QMainWindow):
 
     def _reboot_worker(self):
         commands = (
-            ["systemctl", "reboot", "--no-block"],
-            ["sudo", "-n", "systemctl", "reboot", "--no-block"],
+            ["systemctl", "reboot", "--no-block", "--no-wall"],
+            ["sudo", "-n", "systemctl", "reboot", "--no-block", "--no-wall"],
         )
         errors = []
 

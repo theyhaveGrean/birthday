@@ -381,6 +381,33 @@ def test_reboot_busy_state_ignores_repeat_select():
     assert widget.reboot_status == "rebooting..."
 
 
+def test_reboot_worker_uses_no_wall(monkeypatch):
+    commands = []
+
+    class FakeResult:
+        returncode = 1
+        stdout = ""
+        stderr = "permission denied"
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        return FakeResult()
+
+    class FakeSignal:
+        def emit(self, *args):
+            pass
+
+    fake_window = type("FakeWindow", (), {"reboot_finished": FakeSignal()})()
+    monkeypatch.setattr(app.subprocess, "run", fake_run)
+
+    app.VideoArchiveWindow._reboot_worker(fake_window)
+
+    assert commands == [
+        ["systemctl", "reboot", "--no-block", "--no-wall"],
+        ["sudo", "-n", "systemctl", "reboot", "--no-block", "--no-wall"],
+    ]
+
+
 def test_admin_busy_state_ignores_repeat_select_until_finished():
     widget = _config_widget()
     widget.show_settings_home()
