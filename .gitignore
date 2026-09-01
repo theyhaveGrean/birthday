@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+.pytest_cache/
 *.pyc
 *.pyo
 .venv/
@@ -7,12 +8,19 @@ __pycache__/
 
 # Runtime / logs
 *.log
-.selected_video
+*.log.*
 .cloud_message.txt
+.cloud_message_meta.json
 .cloud_message_token
 memos.json
+.read_memos.json
 *.sock
 
 # Editor junk
 .vscode/
 .DS_Store
+
+# Local media (keep large personal files out of Git)
+videos_raw/
+normalized_videos/*
+!normalized_videos/.gitkeep

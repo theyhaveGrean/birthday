@@ -9,13 +9,14 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Signal
 
 from .config import MPV_LOG_FILE
+from .storage import clamp_int
 
 
 class MpvController(QObject):
-    ready = Signal()
-    started = Signal()
-    ended = Signal()
-    failed = Signal(str)
+    ready = Signal(int)
+    started = Signal(int)
+    ended = Signal(int)
+    failed = Signal(int, str)
 
     def __init__(self):
         super().__init__()
@@ -27,17 +28,18 @@ class MpvController(QObject):
         self._sock = None
         self._send_lock = threading.Lock()
         self._reader_thread = None
+        self._generation = 0
         self._stopping = False
         self._started_sent = False
         self._log_file = None
 
-    def preload(self, path, wid, volume=100):
+    def preload(self, path, wid, volume=100, event_generation=0):
         self.stop(silent=True)
 
         path = Path(path)
 
         if not path.exists():
-            self.failed.emit(f"FILE NOT FOUND: {path.name}")
+            self.failed.emit(int(event_generation), f"FILE NOT FOUND: {path.name}")
             return
 
         try:
@@ -53,10 +55,7 @@ class MpvController(QObject):
         #  - embedding into the Qt native child window
         #  - loading paused behind the transition
         #  - IPC control
-        volume = max(
-            0,
-            min(150, int(volume)),
-        )
+        volume = clamp_int(volume, 0, 150)
 
         args = [
             "mpv",
@@ -95,11 +94,23 @@ class MpvController(QObject):
             )
 
         except OSError as exc:
-            self.failed.emit(str(exc))
+            if self._log_file is not None:
+                try:
+                    self._log_file.close()
+                except OSError:
+                    pass
+                self._log_file = None
+            self.process = None
+            self.failed.emit(int(event_generation), str(exc))
             return
 
+        self._generation += 1
+        generation = self._generation
+        process = self.process
+        socket_path = self.socket_path
         self._reader_thread = threading.Thread(
             target=self._ipc_reader,
+            args=(generation, int(event_generation), process, socket_path),
             daemon=True,
         )
         self._reader_thread.start()
@@ -115,10 +126,7 @@ class MpvController(QObject):
         )
 
     def set_volume(self, volume):
-        volume = max(
-            0,
-            min(150, int(volume)),
-        )
+        volume = clamp_int(volume, 0, 150)
 
         self.command(
             ["set_property", "volume-max", 150]
@@ -159,6 +167,8 @@ class MpvController(QObject):
 
     def stop(self, silent=False):
         self._stopping = True
+        self._generation += 1
+        reader_thread = self._reader_thread
 
         if self._sock is not None:
             self.command(["quit"])
@@ -185,6 +195,14 @@ class MpvController(QObject):
         self._sock = None
         self.process = None
 
+        if (
+            reader_thread is not None
+            and reader_thread is not threading.current_thread()
+            and reader_thread.is_alive()
+        ):
+            reader_thread.join(timeout=0.75)
+        self._reader_thread = None
+
         try:
             os.unlink(self.socket_path)
         except FileNotFoundError:
@@ -200,7 +218,7 @@ class MpvController(QObject):
         if not silent:
             self._stopping = False
 
-    def _fail_with_log(self, message):
+    def _fail_with_log(self, event_generation, message):
         detail = ""
 
         try:
@@ -223,37 +241,37 @@ class MpvController(QObject):
                 f"{detail}"
             )
 
-        self.failed.emit(message)
+        self.failed.emit(int(event_generation), message)
 
-    def _ipc_reader(self):
+    def _ipc_reader(self, generation, event_generation, process, socket_path):
         deadline = (
             time.monotonic() + 8.0
         )
 
         while time.monotonic() < deadline:
-            if self.process is None:
+            if generation != self._generation:
                 return
 
-            return_code = self.process.poll()
+            return_code = process.poll()
 
             if return_code is not None:
-                if not self._stopping:
+                if not self._stopping and generation == self._generation:
                     self._fail_with_log(
-                        f"mpv exited with code {return_code}"
+                        event_generation, f"mpv exited with code {return_code}"
                     )
                 return
 
             if os.path.exists(
-                self.socket_path
+                socket_path
             ):
                 break
 
             time.sleep(0.02)
 
         else:
-            if not self._stopping:
+            if not self._stopping and generation == self._generation:
                 self._fail_with_log(
-                    "mpv IPC did not become ready"
+                    event_generation, "mpv IPC did not become ready"
                 )
             return
 
@@ -264,14 +282,21 @@ class MpvController(QObject):
 
         try:
             sock.connect(
-                self.socket_path
+                socket_path
             )
 
         except OSError as exc:
-            if not self._stopping:
+            if not self._stopping and generation == self._generation:
                 self._fail_with_log(
-                    f"mpv IPC connection failed: {exc}"
+                    event_generation, f"mpv IPC connection failed: {exc}"
                 )
+            return
+
+        if generation != self._generation:
+            try:
+                sock.close()
+            except OSError:
+                pass
             return
 
         self._sock = sock
@@ -308,7 +333,7 @@ class MpvController(QObject):
         buffer = b""
 
         try:
-            while True:
+            while generation == self._generation:
                 chunk = sock.recv(4096)
 
                 if not chunk:
@@ -335,8 +360,8 @@ class MpvController(QObject):
                         "event"
                     )
 
-                    if event == "file-loaded":
-                        self.ready.emit()
+                    if event == "file-loaded" and generation == self._generation:
+                        self.ready.emit(event_generation)
 
                     elif event == "playback-restart":
                         pass
@@ -346,12 +371,14 @@ class MpvController(QObject):
                             message.get("name") == "eof-reached"
                             and message.get("data") is True
                             and not self._stopping
+                            and generation == self._generation
                         ):
-                            self.ended.emit()
+                            self.ended.emit(event_generation)
                         elif (
                             message.get("name") == "time-pos"
                             and not self._started_sent
                             and not self._stopping
+                            and generation == self._generation
                         ):
                             position = message.get(
                                 "data"
@@ -362,7 +389,7 @@ class MpvController(QObject):
                                 and position >= 0.15
                             ):
                                 self._started_sent = True
-                                self.started.emit()
+                                self.started.emit(event_generation)
 
                     elif event == "end-file":
                         # Fallback for mpv versions/configurations that
@@ -375,8 +402,9 @@ class MpvController(QObject):
                         if (
                             reason == "eof"
                             and not self._stopping
+                            and generation == self._generation
                         ):
-                            self.ended.emit()
+                            self.ended.emit(event_generation)
 
         except OSError:
             pass

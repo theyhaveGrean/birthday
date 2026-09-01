@@ -1,7 +1,7 @@
 # Private Cloud Messages
 
 The app can fetch a short private text message and show it in
-`APPS` -> `MEMOS`.
+`HOME` -> `MEMOS`.
 
 ## GitHub Private Repo Setup
 
@@ -27,14 +27,21 @@ chmod 600 /home/pi/app/.cloud_message_token
 
 6. Restart the app the same way you normally do. A reboot is fine.
 
+The token is treated specifically as a GitHub credential. The app only sends it
+to `github.com`, `api.github.com`, or `raw.githubusercontent.com`; configuring a
+non-GitHub memo URL will not forward this token.
+
 You can also use an environment variable instead of the token file:
 
 ```bash
 export CLOUD_MESSAGE_TOKEN="github_pat_..."
 ```
 
-The app fetches once after startup, then every 60 seconds.
+The app fetches once after startup, then every 60 seconds. Unchanged
+messages are not rewritten locally, which avoids unnecessary SD-card writes
+and keeps the memo's cached receive timestamp stable.
 
-Keep messages short. The app reads at most 1200 characters.
+Keep messages short. The app displays at most 1200 Unicode characters.
 Each changed message is saved locally in `/home/pi/app/memos.json`, with
-the newest memo shown first in `APPS` -> `MEMOS`.
+the newest memo shown first in `HOME` -> `MEMOS`. The current-message cache
+stores its receive timestamp in `.cloud_message_meta.json`.

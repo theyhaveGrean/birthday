@@ -1,5 +1,8 @@
 {
   "volume": 100,
   "sfx_enabled": true,
-  "cloud_message_url": "https://raw.githubusercontent.com/theyhaveGrean/dynamicautumnmessage/main/message.txt"
+  "cloud_message_url": "https://raw.githubusercontent.com/theyhaveGrean/dynamicautumnmessage/main/message.txt",
+  "brightness": 80,
+  "sleep_timeout_minutes": 5,
+  "memo_chime_enabled": true
 }

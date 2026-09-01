@@ -3,12 +3,12 @@ from pathlib import Path
 APP_DIR = Path(__file__).resolve().parents[2]
 VIDEO_DIR = APP_DIR / "normalized_videos"
 ORDER_FILE = APP_DIR / "order.txt"
-SELECTION_FILE = APP_DIR / ".selected_video"
 MPV_LOG_FILE = APP_DIR / "mpv.log"
 SOUND_DIR = APP_DIR / ".cache" / "sounds"
 SETTINGS_FILE = APP_DIR / "settings.json"
 NOTE_FILE = APP_DIR / "note.txt"
 CLOUD_MESSAGE_FILE = APP_DIR / ".cloud_message.txt"
+CLOUD_MESSAGE_META_FILE = APP_DIR / ".cloud_message_meta.json"
 CLOUD_MEMOS_FILE = APP_DIR / "memos.json"
 READ_MEMOS_FILE = APP_DIR / ".read_memos.json"
 CLOUD_MESSAGE_TOKEN_FILE = APP_DIR / ".cloud_message_token"
@@ -19,6 +19,10 @@ ANIMATION_STEP_MS = 55
 DEFAULT_SETTINGS = {
     "volume": 80,
     "sfx_enabled": True,
+    "memo_chime_enabled": True,
+    "wake_on_memo": True,
+    "brightness": 80,
+    "sleep_timeout_minutes": 5,
     "cloud_message_url": "",
 }
 
@@ -31,7 +35,7 @@ DEFAULT_NOTE = (
     "Line 03: every clip is a little saved signal.\n"
     "Line 04: every saved signal points back to you.\n"
     "Line 05: left and right should move through this note.\n"
-    "Line 06: select should close it and return to config.\n"
+    "Line 06: select should close it and return to the previous screen.\n"
     "Line 07: the scrollbar should move as the text moves.\n"
     "Line 08: this line exists mostly for testing.\n"
     "Line 09: so does this one.\n"

@@ -141,8 +141,30 @@ def normalize_videos(args):
 
     failures = 0
 
+    seen_targets = set()
     for source in videos:
         target = output_dir / f"{source.stem}.mp4"
+        target_key = target.name.casefold()
+        if target_key in seen_targets:
+            print(
+                f"FAILED {source.name}: output name collision for {target.name}",
+                file=sys.stderr,
+            )
+            failures += 1
+            continue
+        seen_targets.add(target_key)
+
+        try:
+            same_file = source.resolve() == target.resolve()
+        except OSError:
+            same_file = source.absolute() == target.absolute()
+        if same_file:
+            print(
+                f"FAILED {source.name}: input and output are the same file",
+                file=sys.stderr,
+            )
+            failures += 1
+            continue
 
         if (
             target.exists()
@@ -205,7 +227,7 @@ def parse_args():
 
     parser.add_argument(
         "--input-dir",
-        default=str(VIDEO_DIR),
+        default=str(VIDEO_DIR.parent / "videos_raw"),
         help="Directory containing source videos.",
     )
     parser.add_argument(

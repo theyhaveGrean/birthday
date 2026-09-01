@@ -4,9 +4,11 @@ from PySide6.QtCore import QObject, Signal
 
 class InputController(QObject):
     left_pressed = Signal()
+    left_released = Signal()
     select_pressed = Signal()
     select_held = Signal()
     right_pressed = Signal()
+    right_released = Signal()
 
     def __init__(self):
         super().__init__()
@@ -33,13 +35,18 @@ class InputController(QObject):
         )
 
         self.left_button.when_pressed = self._left_pressed
+        self.left_button.when_released = self._left_released
         self.select_button.when_pressed = self._select_press_started
         self.select_button.when_held = self._select_held
         self.select_button.when_released = self._select_released
         self.right_button.when_pressed = self._right_pressed
+        self.right_button.when_released = self._right_released
 
     def _left_pressed(self):
         self.left_pressed.emit()
+
+    def _left_released(self):
+        self.left_released.emit()
 
     def _select_press_started(self):
         self._select_was_held = False
@@ -55,6 +62,9 @@ class InputController(QObject):
 
     def _right_pressed(self):
         self.right_pressed.emit()
+
+    def _right_released(self):
+        self.right_released.emit()
 
     def close(self):
         self.left_button.close()
