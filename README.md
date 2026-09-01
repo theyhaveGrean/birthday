@@ -24,9 +24,11 @@ physical buttons: **Left**, **Select**, and **Right**.
 
     `startx`
 
-4.  The **Home** screen appears with:
+4.  The **Home** screen appears with Gallery as the large main app and
+    Memos/Settings as smaller bottom apps:
 
-    **GALLERY · MEMOS · SETTINGS**
+    **GALLERY**
+    **MEMOS · SETTINGS**
 
 5.  Use **Left** and **Right** to move between items.
 
@@ -71,7 +73,10 @@ Wi-Fi setup, Sounds, Display, Info, About, and other nested screens.
 
 Home is the top-level screen for the device.
 
-It contains exactly three apps:
+Gallery is the primary app on Home. Memos and Settings are shown as
+smaller bottom apps.
+
+It contains exactly three selectable apps:
 
 1.  **GALLERY**
 2.  **MEMOS**

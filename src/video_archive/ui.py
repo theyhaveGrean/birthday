@@ -1,4 +1,6 @@
+import random
 from collections import deque
+
 from PySide6.QtCore import QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QWidget
@@ -60,6 +62,49 @@ BOOT_LINES = (
     "SYNC FIELD ....... LOCK",
     "VIDEO BUS ........ READY",
 )
+
+
+class RandomTextFlicker:
+    def __init__(self):
+        self.frames_remaining = 0
+        self.next_event_in = random.randint(14, 65)
+
+    @property
+    def active(self):
+        return self.frames_remaining > 0
+
+    def advance(self):
+        if self.frames_remaining > 0:
+            self.frames_remaining -= 1
+            return
+
+        self.next_event_in -= 1
+        if self.next_event_in <= 0:
+            self.frames_remaining = random.randint(1, 3)
+            self.next_event_in = random.randint(22, 90)
+
+    def horizontal_offset(self, phase):
+        if not self.active:
+            return 0
+        offsets = (-10, 7, -5, 12, -8, 5)
+        return offsets[phase % len(offsets)]
+
+
+def apply_text_flicker(painter, flicker, phase):
+    if flicker.active:
+        painter.translate(flicker.horizontal_offset(phase), 0)
+
+
+def draw_static_slices(painter, width, height, phase):
+    seed = (phase * 1103515245 + 12345) & 0xFFFFFFFF
+    painter.setPen(Qt.NoPen)
+    for index in range(5):
+        seed = (seed * 1664525 + 1013904223) & 0xFFFFFFFF
+        y = 80 + ((seed >> 10) % max(1, height - 160))
+        slice_height = 1 + ((seed >> 18) % 3)
+        offset = ((seed >> 22) % 45) - 22
+        color = GREEN_MUTED if index % 2 == 0 else GREEN_DIM
+        painter.fillRect(max(0, offset), y, width - abs(offset), slice_height, color)
 
 
 def draw_text_glow(painter, rect, flags, text, font, color, glow_color):
@@ -190,6 +235,7 @@ class StartScreenWidget(QWidget):
         super().__init__(parent)
 
         self.flicker_phase = 0
+        self.text_flicker = RandomTextFlicker()
         self.boot_tick = 0
         self.boot_complete = False
 
@@ -206,7 +252,8 @@ class StartScreenWidget(QWidget):
         self.boot_timer.start(5000)
 
     def _advance_flicker(self):
-        self.flicker_phase = (self.flicker_phase + 1) % 32
+        self.flicker_phase += 1
+        self.text_flicker.advance()
         if not self.boot_complete:
             self.boot_tick += 1
         self.update()
@@ -253,8 +300,12 @@ class StartScreenWidget(QWidget):
             painter,
             self.width(),
             self.height(),
-            self.flicker_phase,
+            self.flicker_phase % 32,
         )
+
+        if self.text_flicker.active:
+            draw_static_slices(painter, self.width(), self.height(), self.flicker_phase)
+        apply_text_flicker(painter, self.text_flicker, self.flicker_phase)
 
         title_font = QFont("DejaVu Sans Mono", 46, QFont.Bold)
         draw_text_glow(
@@ -349,6 +400,7 @@ class HomeWidget(QWidget):
         self.selected_index = 0
         self.unread_memo_count = max(0, int(unread_memo_count))
         self.flicker_phase = 0
+        self.text_flicker = RandomTextFlicker()
         self.setFocusPolicy(Qt.NoFocus)
         self.setCursor(Qt.BlankCursor)
 
@@ -357,7 +409,8 @@ class HomeWidget(QWidget):
         self.flicker_timer.start(90)
 
     def _advance_flicker(self):
-        self.flicker_phase = (self.flicker_phase + 1) % 32
+        self.flicker_phase += 1
+        self.text_flicker.advance()
         self.update()
 
     def set_unread_memo_count(self, count):
@@ -379,6 +432,36 @@ class HomeWidget(QWidget):
     def select(self):
         self.app_requested.emit(HOME_APPS[self.selected_index].lower())
 
+    def _draw_home_option(self, painter, index, rect, label, value=""):
+        selected = index == self.selected_index
+
+        if selected:
+            painter.fillRect(
+                rect.left(),
+                rect.top() + 6,
+                6,
+                rect.height() - 12,
+                GREEN_BRIGHT,
+            )
+            painter.setPen(GREEN_BRIGHT)
+        else:
+            painter.setPen(TEXT_MAIN)
+
+        painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
+        painter.drawText(
+            rect.adjusted(24, 0, -24, 0),
+            Qt.AlignLeft | Qt.AlignVCenter,
+            label,
+        )
+
+        painter.setFont(QFont("DejaVu Sans Mono", 14, QFont.Bold))
+        painter.setPen(GREEN_MAIN if selected else TEXT_DIM)
+        painter.drawText(
+            rect.adjusted(24, 0, -24, 0),
+            Qt.AlignRight | Qt.AlignVCenter,
+            value,
+        )
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, False)
@@ -387,53 +470,91 @@ class HomeWidget(QWidget):
         for y in range(0, self.height(), 16):
             painter.fillRect(0, y, self.width(), 5, BG_STRIPE)
         draw_global_flicker(painter, self.width(), self.height(), self.flicker_phase)
+        if self.text_flicker.active:
+            draw_random_screen_flicker(
+                painter,
+                self.width(),
+                self.height(),
+                self.flicker_phase,
+            )
 
         painter.setPen(QPen(GREEN_MUTED, 3))
         painter.drawRect(26, 26, self.width() - 52, self.height() - 52)
         painter.setPen(QPen(GREEN_DIM, 1))
         painter.drawRect(36, 36, self.width() - 72, self.height() - 72)
+        if self.text_flicker.active:
+            draw_static_slices(painter, self.width(), self.height(), self.flicker_phase)
+        apply_text_flicker(painter, self.text_flicker, self.flicker_phase)
 
-        painter.setFont(QFont("DejaVu Sans Mono", 20, QFont.Bold))
+        painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
         painter.setPen(GREEN_BRIGHT)
-        painter.drawText(QRect(60, 62, self.width()-120, 44), Qt.AlignCenter, "HOME")
-        painter.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+        painter.drawText(60, 82, "4AUTUMN.EXE // HOME")
         painter.setPen(TEXT_DIM)
-        painter.drawText(QRect(60, 106, self.width()-120, 28), Qt.AlignCenter, "SELECT AN APP")
-
-        tile_w = 250
-        tile_h = 190
-        gap = 35
-        total = tile_w * 3 + gap * 2
-        start_x = (self.width() - total) // 2
-        top = 185
-        descriptions = ("VIDEO ARCHIVE", "PRIVATE MESSAGES", "DEVICE CONTROL")
-        for i, label in enumerate(HOME_APPS):
-            rect = QRect(start_x + i * (tile_w + gap), top, tile_w, tile_h)
-            selected = i == self.selected_index
-            painter.setPen(QPen(GREEN_BRIGHT if selected else GREEN_DIM, 3 if selected else 1))
-            if selected:
-                painter.fillRect(rect.adjusted(4,4,-4,-4), QColor(23,59,25,90))
-            painter.drawRect(rect)
-            painter.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
-            painter.setPen(GREEN_BRIGHT if selected else GREEN_MAIN)
-            painter.drawText(rect.adjusted(12, 35, -12, -70), Qt.AlignCenter, label)
-            painter.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
-            painter.setPen(TEXT_MAIN if selected else TEXT_DIM)
-            desc = descriptions[i]
-            if label == "MEMOS" and self.unread_memo_count:
-                desc += f"  [{self.unread_memo_count} NEW]"
-            painter.drawText(rect.adjusted(12, 105, -12, -18), Qt.AlignCenter, desc)
-
-        painter.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
-        painter.setPen(TEXT_DIM)
-        painter.drawText(QRect(60, self.height()-96, self.width()-120, 30), Qt.AlignCenter, "LEFT/RIGHT CHOOSE   SELECT OPEN")
-        painter.setFont(QFont("DejaVu Sans Mono", 9, QFont.Bold))
-        painter.setPen(GREEN_MUTED)
         painter.drawText(
-            QRect(60, self.height()-64, self.width()-120, 20),
-            Qt.AlignCenter,
-            "built with \u2665 by adityan for autumn",
+            QRect(self.width() - 330, 55, 270, 35),
+            Qt.AlignRight | Qt.AlignVCenter,
+            "LOCAL // HOME",
         )
+        painter.setPen(GREEN_DIM)
+        painter.drawLine(60, 105, self.width() - 60, 105)
+        painter.drawLine(
+            60,
+            self.height() - 75,
+            self.width() - 60,
+            self.height() - 75,
+        )
+
+        menu_left = 118
+        menu_top = 165
+        row_height = 60
+        row_gap = 10
+        row_step = row_height + row_gap
+        detail_top = menu_top
+        content_bottom = self.height() - 105
+        detail = QRect(455, detail_top, self.width() - 565, content_bottom - detail_top)
+
+        values = ("MAIN", "", "")
+        for index, label in enumerate(HOME_APPS):
+            rect = QRect(
+                menu_left,
+                menu_top + index * row_step,
+                300,
+                row_height,
+            )
+            self._draw_home_option(painter, index, rect, label, values[index])
+
+        painter.setPen(GREEN_DIM)
+        painter.drawLine(410, detail_top, 410, content_bottom)
+
+        detail_titles = ("VIDEO ARCHIVE", "PRIVATE MEMOS", "DEVICE SETTINGS")
+        detail_texts = [
+            "SELECT TO OPEN GALLERY\nBROWSE AND PLAY SAVED VIDEOS",
+            "SELECT TO READ MEMOS\nCLOUD MESSAGE INBOX",
+            "SELECT TO CONFIGURE DEVICE\nWIFI // SOUND // DISPLAY",
+        ]
+        if self.unread_memo_count:
+            detail_texts[1] += f"\n{self.unread_memo_count} UNREAD"
+
+        painter.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
+        painter.setPen(GREEN_BRIGHT)
+        painter.drawText(detail, Qt.AlignLeft | Qt.AlignTop, detail_titles[self.selected_index])
+
+        painter.setFont(QFont("DejaVu Sans Mono", 16, QFont.Bold))
+        painter.setPen(TEXT_DIM)
+        painter.drawText(
+            detail.adjusted(0, 58, 0, 0),
+            Qt.AlignLeft | Qt.AlignTop,
+            detail_texts[self.selected_index],
+        )
+
+        if self.selected_index == 1 and self.unread_memo_count:
+            badge = QRect(detail.left(), detail.top() + 150, 128, 34)
+            painter.fillRect(badge, RED_BG)
+            painter.setPen(QPen(RED_BRIGHT, 2))
+            painter.drawRect(badge)
+            painter.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
+            painter.setPen(RED_BRIGHT)
+            painter.drawText(badge, Qt.AlignCenter, "UNREAD")
 
 
 class GalleryWidget(QWidget):
@@ -469,6 +590,7 @@ class GalleryWidget(QWidget):
         # Subtle continuous CRT activity. This is intentionally
         # deterministic and low-key rather than random flashing.
         self.flicker_phase = 0
+        self.text_flicker = RandomTextFlicker()
         self.flicker_timer = QTimer(self)
         self.flicker_timer.timeout.connect(
             self._advance_flicker
@@ -549,9 +671,8 @@ class GalleryWidget(QWidget):
         self.update()
 
     def _advance_flicker(self):
-        self.flicker_phase = (
-            self.flicker_phase + 1
-        ) % 24
+        self.flicker_phase += 1
+        self.text_flicker.advance()
 
         self.update()
 
@@ -676,8 +797,15 @@ class GalleryWidget(QWidget):
             painter,
             self.width(),
             self.height(),
-            self.flicker_phase,
+            self.flicker_phase % 32,
         )
+        if self.text_flicker.active:
+            draw_random_screen_flicker(
+                painter,
+                self.width(),
+                self.height(),
+                self.flicker_phase,
+            )
 
         # =================================================
         # FRAME
@@ -712,6 +840,9 @@ class GalleryWidget(QWidget):
             self.width() - 72,
             self.height() - 72,
         )
+        if self.text_flicker.active:
+            draw_static_slices(painter, self.width(), self.height(), self.flicker_phase)
+        apply_text_flicker(painter, self.text_flicker, self.flicker_phase)
 
         # =================================================
         # HEADER
@@ -1338,6 +1469,26 @@ class SettingsRenderer:
             painter.drawRect(bar)
             if fill_width > 0:
                 painter.fillRect(bar.adjusted(2, 2, -bar.width() + fill_width, -2), GREEN_BRIGHT if widget.editing_brightness else GREEN_MAIN)
+        elif widget.settings_section == "display" and widget.selected_index == 1:
+            bar = QRect(detail.left(), detail.top() + 125, detail.width(), 18)
+            fill_width = int(bar.width() * widget.sleep_timeout_minutes / 60)
+            painter.setPen(GREEN_DIM)
+            painter.drawRect(bar)
+            for minute in (1, 15, 30, 45, 60):
+                x = bar.left() + int(bar.width() * minute / 60)
+                painter.drawLine(x, bar.top() - 7, x, bar.bottom() + 7)
+            if fill_width > 0:
+                painter.fillRect(
+                    bar.adjusted(2, 2, -bar.width() + fill_width, -2),
+                    GREEN_BRIGHT if widget.editing_sleep_timeout else GREEN_MAIN,
+                )
+            painter.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
+            painter.setPen(GREEN_BRIGHT if widget.editing_sleep_timeout else TEXT_MAIN)
+            painter.drawText(
+                QRect(detail.left(), detail.top() + 158, detail.width(), 30),
+                Qt.AlignCenter,
+                f"{widget.sleep_timeout_minutes} MIN",
+            )
         elif widget.settings_section == "sounds" and widget.selected_index in (1, 2):
             widget._draw_settings_toggle(painter, detail, widget.sfx_enabled if widget.selected_index == 1 else widget.memo_chime_enabled)
         elif widget.settings_section == "display" and widget.selected_index == 2:
@@ -1388,32 +1539,17 @@ class MemoRenderer:
         )
         if selected_unread and not host.memo_reading:
             memo = "NEW MEMO // UNREAD\n\nSELECT TO OPEN"
-        panel = QRect(70, 108, host.width() - 140, host.height() - 205)
         left = QRect(
-            panel.left() + 30,
-            panel.top() + 68,
-            230,
-            panel.height() - 118,
+            118,
+            160,
+            290,
+            host.height() - 253,
         )
         right = QRect(
-            left.right() + 28,
+            455,
             left.top(),
-            panel.right() - left.right() - 76,
+            host.width() - 565,
             left.height(),
-        )
-
-        painter.fillRect(panel, QColor("#071007"))
-        pen = QPen(GREEN_BRIGHT)
-        pen.setWidth(3)
-        painter.setPen(pen)
-        painter.drawRect(panel)
-
-        painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
-        painter.setPen(GREEN_BRIGHT)
-        painter.drawText(
-            panel.adjusted(30, 24, -30, -24),
-            Qt.AlignLeft | Qt.AlignTop,
-            "MEMOS",
         )
 
         painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
@@ -1423,18 +1559,19 @@ class MemoRenderer:
             else TEXT_DIM
         )
         painter.drawText(
-            panel.adjusted(30, 24, -30, -24),
+            QRect(host.width() - 330, 88, 270, 22),
             Qt.AlignRight | Qt.AlignTop,
             f"CLOUD // {host.cloud_status}",
         )
 
         painter.setPen(GREEN_DIM)
-        painter.drawLine(left.right() + 14, left.top(), left.right() + 14, left.bottom())
+        painter.drawLine(410, left.top(), 410, left.bottom())
 
         painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
         metrics = painter.fontMetrics()
         memo_rows = list(memos)
-        visible_memos = max(1, left.height() // 42)
+        row_height = 54
+        visible_memos = max(1, left.height() // row_height)
         start = max(
             0,
             min(
@@ -1444,36 +1581,50 @@ class MemoRenderer:
         )
         for index, item in enumerate(memo_rows[start : start + visible_memos], start=start):
             selected = index == host.memo_selected_index
-            y = left.top() + (index - start) * 42
+            y = left.top() + (index - start) * row_height
             unread = memo_key(item) not in host.read_memo_keys
             if selected:
                 painter.fillRect(
-                    QRect(left.left() - 8, y - 2, left.width(), 34),
-                    RED_DIM if unread else GREEN_DIM,
+                    left.left(),
+                    y + 6,
+                    6,
+                    row_height - 12,
+                    RED_BRIGHT if unread else GREEN_BRIGHT,
                 )
             painter.setPen(
                 RED_BRIGHT if selected and unread
                 else GREEN_BRIGHT if selected
                 else TEXT_MAIN
             )
-            date = metrics.elidedText(item.get("date", "--"), Qt.ElideRight, left.width() - 8)
+            date = metrics.elidedText(item.get("date", "--"), Qt.ElideRight, left.width() - 32)
             painter.drawText(
-                QRect(left.left(), y, left.width(), 18),
+                QRect(left.left() + 24, y, left.width() - 32, 24),
                 Qt.AlignLeft | Qt.AlignVCenter,
                 date,
             )
             painter.setPen(GREEN_MAIN if selected else TEXT_DIM)
-            row_label = "!! NEW MEMO !!" if unread else "PRIVATE MEMO"
+            row_label = "UNREAD" if unread else "PRIVATE MEMO"
             if unread:
                 painter.setPen(RED_BRIGHT)
             painter.drawText(
-                QRect(left.left(), y + 17, left.width(), 16),
+                QRect(left.left() + 24, y + 24, left.width() - 32, 22),
                 Qt.AlignLeft | Qt.AlignVCenter,
                 row_label,
             )
 
+        detail_title = "NO MEMOS"
+        if memos:
+            detail_title = "UNREAD MEMO" if selected_unread else "PRIVATE MEMO"
+            if host.memo_reading:
+                detail_title = "READING MEMO"
+
+        painter.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
+        painter.setPen(RED_BRIGHT if selected_unread and not host.memo_reading else GREEN_BRIGHT)
+        painter.drawText(right, Qt.AlignLeft | Qt.AlignTop, detail_title)
+
+        body = right.adjusted(0, 62, -16, -46)
         painter.setFont(QFont("DejaVu Sans Mono", 16, QFont.Bold))
-        painter.setPen(TEXT_MAIN)
+        painter.setPen(TEXT_MAIN if host.memo_reading else TEXT_DIM)
         metrics = painter.fontMetrics()
         line_height = metrics.lineSpacing()
 
@@ -1499,7 +1650,7 @@ class MemoRenderer:
         # newline characters, so a long cloud memo could be clipped into one
         # unscrollable line.
         lines = []
-        wrap_width = max(1, right.width() - 16)
+        wrap_width = max(1, body.width())
         paragraphs = memo.splitlines() or [""]
         for paragraph in paragraphs:
             if not paragraph:
@@ -1534,7 +1685,7 @@ class MemoRenderer:
                 lines.append(current)
 
         lines = lines or [""]
-        visible_lines = max(1, right.height() // line_height)
+        visible_lines = max(1, body.height() // line_height)
         max_scroll = max(0, len(lines) - visible_lines)
         host.memo_max_scroll = max_scroll
         host.memo_scroll = min(host.memo_scroll, max_scroll)
@@ -1542,13 +1693,13 @@ class MemoRenderer:
             lines[host.memo_scroll : host.memo_scroll + visible_lines]
         )
         painter.drawText(
-            right.adjusted(0, 0, -16, 0),
+            body,
             Qt.AlignLeft | Qt.AlignTop,
             visible_text,
         )
 
         if max_scroll > 0:
-            track = QRect(right.right() - 5, right.top(), 4, right.height())
+            track = QRect(right.right() - 5, body.top(), 4, body.height())
             thumb_height = max(24, int(track.height() * visible_lines / len(lines)))
             thumb_top = track.top() + int(
                 (track.height() - thumb_height) * host.memo_scroll / max_scroll
@@ -1573,7 +1724,7 @@ class MemoRenderer:
         else:
             mode_text = "LEFT/RIGHT MEMO   SELECT OPEN   HOLD SELECT: HOME"
         painter.drawText(
-            panel.adjusted(30, 0, -30, -24),
+            QRect(60, host.height() - 67, host.width() - 120, 26),
             Qt.AlignLeft | Qt.AlignBottom,
             mode_text,
         )
@@ -1973,6 +2124,7 @@ class ConfigWidget(QWidget):
         self.memo_scroll = 0
         self.memo_max_scroll = 0
         self.flicker_phase = 0
+        self.text_flicker = RandomTextFlicker()
 
         self.setFocusPolicy(Qt.NoFocus)
         self.setCursor(Qt.BlankCursor)
@@ -2549,7 +2701,8 @@ class ConfigWidget(QWidget):
                 self.wifi_status = "password limit reached"
 
     def _advance_flicker(self):
-        self.flicker_phase = (self.flicker_phase + 1) % 32
+        self.flicker_phase += 1
+        self.text_flicker.advance()
         self.update()
 
     def _draw_shell(self, painter):
@@ -2694,6 +2847,15 @@ class ConfigWidget(QWidget):
         painter.setRenderHint(QPainter.TextAntialiasing, True)
 
         self._draw_shell(painter)
+        if self.text_flicker.active:
+            draw_random_screen_flicker(
+                painter,
+                self.width(),
+                self.height(),
+                self.flicker_phase,
+            )
+            draw_static_slices(painter, self.width(), self.height(), self.flicker_phase)
+        apply_text_flicker(painter, self.text_flicker, self.flicker_phase)
 
         if self.showing_admin:
             self._draw_admin(painter)

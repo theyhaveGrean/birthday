@@ -46,11 +46,14 @@ from .ui import (
     ConfigWidget,
     GalleryWidget,
     HomeWidget,
+    RandomTextFlicker,
     StartScreenWidget,
     TransitionWidget,
+    apply_text_flicker,
     draw_global_flicker,
     draw_random_screen_flicker,
     draw_signal_acquisition_flicker,
+    draw_static_slices,
 )
 
 VIDEO_EXTENSIONS = {".mp4", ".mov"}
@@ -286,6 +289,7 @@ class PlaybackPage(QWidget):
 
         self.current_title = ""
         self.flicker_phase = 0
+        self.text_flicker = RandomTextFlicker()
 
         self.setCursor(
             Qt.BlankCursor
@@ -302,7 +306,8 @@ class PlaybackPage(QWidget):
     def _advance_flicker(self):
         self.flicker_phase = (
             self.flicker_phase + 1
-        ) % 32
+        )
+        self.text_flicker.advance()
 
         self.update()
 
@@ -426,12 +431,13 @@ class PlaybackPage(QWidget):
             self.height(),
             self.flicker_phase,
         )
-        draw_random_screen_flicker(
-            painter,
-            self.width(),
-            self.height(),
-            self.flicker_phase,
-        )
+        if self.text_flicker.active:
+            draw_random_screen_flicker(
+                painter,
+                self.width(),
+                self.height(),
+                self.flicker_phase,
+            )
         draw_signal_acquisition_flicker(
             painter,
             self.width(),
@@ -527,6 +533,10 @@ class PlaybackPage(QWidget):
                 -6,
             )
         )
+
+        if self.text_flicker.active:
+            draw_static_slices(painter, self.width(), self.height(), self.flicker_phase)
+        apply_text_flicker(painter, self.text_flicker, self.flicker_phase)
 
         # Header.
         painter.setFont(
