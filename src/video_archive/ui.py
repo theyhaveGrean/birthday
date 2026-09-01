@@ -833,527 +833,122 @@ class GalleryWidget(QWidget):
     # PAINT
     # =====================================================
 
-    def paintEvent(
-        self,
-        event,
-    ):
+    def paintEvent(self, event):
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
+        painter.fillRect(self.rect(), BG)
+        for y in range(0, self.height(), 16):
+            painter.fillRect(0, y, self.width(), 5, BG_STRIPE)
 
-        painter.setRenderHint(
-            QPainter.Antialiasing,
-            False,
-        )
-
-        painter.setRenderHint(
-            QPainter.TextAntialiasing,
-            True,
-        )
-
-        # =================================================
-        # BACKGROUND
-        # =================================================
-
-        painter.fillRect(
-            self.rect(),
-            BG,
-        )
-
-        # Very subtle CRT-ish bands.
-        for y in range(
-            0,
-            self.height(),
-            16,
-        ):
-            painter.fillRect(
-                0,
-                y,
-                self.width(),
-                5,
-                BG_STRIPE,
-            )
-
-        # A faint moving scan line gives the screen a little
-        # life without making the UI hard to read.
-        scan_y = (
-            118
-            + (self.flicker_phase * 17)
-            % max(1, self.height() - 180)
-        )
-
-        painter.fillRect(
-            42,
-            scan_y,
-            self.width() - 84,
-            1,
-            GREEN_DIM,
-        )
-
-        draw_global_flicker(
-            painter,
-            self.width(),
-            self.height(),
-            self.flicker_phase,
-        )
-        draw_tracking_glitch(
-            painter,
-            self.width(),
-            self.height(),
-            self.flicker_phase % 32,
-        )
+        scan_y = 118 + (self.flicker_phase * 17) % max(1, self.height() - 180)
+        painter.fillRect(42, scan_y, self.width() - 84, 1, GREEN_DIM)
+        draw_global_flicker(painter, self.width(), self.height(), self.flicker_phase)
+        draw_tracking_glitch(painter, self.width(), self.height(), self.flicker_phase % 32)
         if self.text_flicker.active:
-            draw_random_screen_flicker(
-                painter,
-                self.width(),
-                self.height(),
-                self.flicker_phase,
-            )
+            draw_random_screen_flicker(painter, self.width(), self.height(), self.flicker_phase)
 
-        # =================================================
-        # FRAME
-        # =================================================
-
-        pen = QPen(
-            GREEN_MUTED
-        )
-
-        pen.setWidth(3)
-
-        painter.setPen(pen)
-
-        painter.drawRect(
-            26,
-            26,
-            self.width() - 52,
-            self.height() - 52,
-        )
-
-        pen = QPen(
-            GREEN_DIM
-        )
-
-        pen.setWidth(1)
-
-        painter.setPen(pen)
-
-        painter.drawRect(
-            36,
-            36,
-            self.width() - 72,
-            self.height() - 72,
-        )
+        painter.setPen(QPen(GREEN_MUTED, 3))
+        painter.drawRect(26, 26, self.width() - 52, self.height() - 52)
+        painter.setPen(QPen(GREEN_DIM, 1))
+        painter.drawRect(36, 36, self.width() - 72, self.height() - 72)
         if self.text_flicker.active:
             draw_static_slices(painter, self.width(), self.height(), self.flicker_phase)
         apply_text_flicker(painter, self.text_flicker, self.flicker_phase)
 
-        # =================================================
-        # HEADER
-        # =================================================
+        painter.setFont(QFont("DejaVu Sans Mono", 17, QFont.Bold))
+        painter.setPen(GREEN_MAIN)
+        painter.drawText(60, 82, "4AUTUMN.EXE // GALLERY")
+        painter.setPen(TEXT_DIM)
+        painter.drawText(QRect(self.width() - 330, 55, 270, 35), Qt.AlignRight | Qt.AlignVCenter, "LOCAL // GALLERY")
+        painter.setPen(GREEN_DIM)
+        painter.drawLine(60, 105, self.width() - 60, 105)
+        painter.drawLine(60, self.height() - 75, self.width() - 60, self.height() - 75)
 
-        painter.setFont(
-            QFont(
-                "DejaVu Sans Mono",
-                17,
-                QFont.Bold,
-            )
-        )
-
-        painter.setPen(
-            GREEN_MAIN
-        )
-
-        painter.drawText(
-            60,
-            82,
-            "4AUTUMN.EXE // GALLERY",
-        )
-
-        painter.setPen(
-            TEXT_DIM
-        )
-
-        painter.drawText(
-            QRect(
-                self.width() - 330,
-                55,
-                270,
-                35,
-            ),
-            Qt.AlignRight
-            | Qt.AlignVCenter,
-            "LOCAL // GALLERY",
-        )
-
-        painter.setPen(
-            GREEN_DIM
-        )
-
-        painter.drawLine(
-            60,
-            105,
-            self.width() - 60,
-            105,
-        )
-
-        # =================================================
-        # UNREAD MEMO ALERT
-        # =================================================
-
+        content_top = 150
         if self.unread_memo_count:
-            pulse_on = self.flicker_phase % 8 < 5
-            alert_rect = QRect(
-                82,
-                128,
-                self.width() - 164,
-                64,
-            )
-
-            painter.fillRect(
-                alert_rect,
-                RED_BG,
-            )
-
-            alert_pen = QPen(RED_BRIGHT if pulse_on else RED_MAIN)
-            alert_pen.setWidth(4)
-            painter.setPen(alert_pen)
-            painter.drawRect(alert_rect.adjusted(-5, -5, 5, 5))
-
-            painter.setFont(
-                QFont(
-                    "DejaVu Sans Mono",
-                    23,
-                    QFont.Bold,
-                )
-            )
-            painter.setPen(RED_BRIGHT if pulse_on else RED_MAIN)
-            label = (
-                "!! NEW MEMO — HOME > MEMOS !!"
-                if self.unread_memo_count == 1
-                else f"!! {self.unread_memo_count} NEW MEMOS — HOME > MEMOS !!"
-            )
-            painter.drawText(
-                alert_rect,
-                Qt.AlignCenter,
-                label,
-            )
-
-        # =================================================
-        # NO MEDIA
-        # =================================================
+            alert = QRect(118, 122, self.width() - 236, 34)
+            painter.fillRect(alert, RED_BG)
+            painter.setPen(QPen(RED_BRIGHT, 2))
+            painter.drawRect(alert)
+            painter.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
+            painter.setPen(RED_BRIGHT)
+            label = "NEW MEMO // HOME > MEMOS" if self.unread_memo_count == 1 else f"{self.unread_memo_count} NEW MEMOS // HOME > MEMOS"
+            painter.drawText(alert.adjusted(12, 0, -12, 0), Qt.AlignLeft | Qt.AlignVCenter, label)
+            content_top = 174
 
         if not self.titles:
-
-            painter.setFont(
-                QFont(
-                    "DejaVu Sans Mono",
-                    30,
-                    QFont.Bold,
-                )
-            )
-
-            painter.setPen(
-                GREEN_BRIGHT
-            )
-
-            painter.drawText(
-                self.rect(),
-                Qt.AlignCenter,
-                "NO MEDIA",
-            )
-
+            painter.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
+            painter.setPen(GREEN_BRIGHT)
+            painter.drawText(QRect(118, content_top, self.width() - 236, self.height() - content_top - 110), Qt.AlignLeft | Qt.AlignTop, "NO MEDIA")
+            painter.setFont(QFont("DejaVu Sans Mono", 14, QFont.Bold))
+            painter.setPen(TEXT_DIM)
+            painter.drawText(QRect(60, self.height() - 67, self.width() - 120, 26), Qt.AlignLeft | Qt.AlignBottom, "HOLD SELECT: HOME")
             return
 
-        # =================================================
-        # GALLERY MOTION
-        # =================================================
+        list_left = 118
+        list_width = 410
+        divider_x = 548
+        detail_left = 585
+        content_bottom = self.height() - 105
+        row_height = 56
+        row_gap = 8
+        row_step = row_height + row_gap
+        available_h = max(row_height, content_bottom - content_top)
+        visible_rows = min(len(self.titles), max(1, available_h // row_step))
+        half = visible_rows // 2
+        start = max(0, min(self.selected_index - half, len(self.titles) - visible_rows))
 
-        offset = 0
-
+        animation_px = 0
         if self.animating:
-
-            fraction = (
-                self.animation_step
-                / ANIMATION_STEPS
-            )
-
-            offset = int(
-                -self.animation_direction
-                * SPACING
-                * fraction
-            )
-
-        # =================================================
-        # GALLERY ITEMS
-        # =================================================
-
-        # =================================================
-        # CLIP GALLERY TO INNER FRAME
-        # =================================================
-
-        gallery_clip = QRect(
-            48,
-            125,
-            self.width() - 96,
-            520,
-        )
+            fraction = self.animation_step / ANIMATION_STEPS
+            animation_px = int(-self.animation_direction * row_step * fraction)
 
         painter.save()
-        painter.setClipRect(gallery_clip)
-        for relative_position in range(
-            -2,
-            3,
-        ):
-
-            index = self.wrapped_index(
-                relative_position
-            )
-
-            title = self.titles[index]
-
-            center_x = (
-                self.width() // 2
-                + relative_position
-                * SPACING
-                + offset
-            )
-
-            slot = QRect(
-                center_x
-                - SLOT_WIDTH // 2,
-
-                GALLERY_CENTER_Y
-                - SLOT_HEIGHT // 2,
-
-                SLOT_WIDTH,
-                SLOT_HEIGHT,
-            )
-
-            selected = (
-                relative_position == 0
-                and not self.animating
-            )
-
-            # =============================================
-            # SELECTED ITEM
-            # =============================================
-
+        painter.setClipRect(QRect(list_left, content_top, list_width, available_h))
+        painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
+        for index in range(start, min(len(self.titles), start + visible_rows + 1)):
+            y = content_top + (index - start) * row_step + animation_px
+            row = QRect(list_left, y, list_width, row_height)
+            selected = index == self.selected_index and not self.animating
             if selected:
-
-                selection_box = QRect(
-                    slot.left() + 8,
-                    slot.top() + 9,
-                    slot.width() - 16,
-                    slot.height() - 18,
-                )
-
-                painter.fillRect(
-                    selection_box,
-                    GREEN_DIM,
-                )
-
-                pen = QPen(
-                    GREEN_BRIGHT
-                )
-
-                pen.setWidth(4)
-
-                painter.setPen(pen)
-
-                painter.drawRect(
-                    selection_box
-                )
-
-                # little side bars
-                painter.fillRect(
-                    selection_box.left()
-                    - 12,
-
-                    selection_box.top()
-                    + 12,
-
-                    6,
-
-                    selection_box.height()
-                    - 24,
-
-                    GREEN_BRIGHT,
-                )
-
-                painter.fillRect(
-                    selection_box.right()
-                    + 7,
-
-                    selection_box.top()
-                    + 12,
-
-                    6,
-
-                    selection_box.height()
-                    - 24,
-
-                    GREEN_BRIGHT,
-                )
-
-                painter.setPen(
-                    GREEN_BRIGHT
-                )
-
-            # =============================================
-            # IMMEDIATE NEIGHBORS
-            # =============================================
-
-            elif abs(
-                relative_position
-            ) == 1:
-
-                painter.setPen(
-                    TEXT_MAIN
-                )
-
-            # =============================================
-            # FAR ITEMS
-            # =============================================
-
+                painter.fillRect(row.left(), row.top() + 6, 6, row.height() - 12, GREEN_BRIGHT)
+                painter.setPen(GREEN_BRIGHT)
             else:
-
-                painter.setPen(
-                    GREEN_MUTED
-                )
-
-            # =============================================
-            # FIT TITLE
-            # =============================================
-
-            # Leave some breathing room inside the slot.
-            title_font = (
-                self.fitted_title_font(
-                    painter,
-                    title,
-                    SLOT_WIDTH - 50,
-                )
-            )
-
-            painter.setFont(
-                title_font
-            )
-            title_metrics = painter.fontMetrics()
-            display_title = title_metrics.elidedText(
-                title, Qt.ElideMiddle, max(1, SLOT_WIDTH - 50)
-            )
-
-            # Qt handles both horizontal + vertical centering. Extremely long
-            # filenames keep their extension visible via middle elision.
-            painter.drawText(
-                slot,
-                Qt.AlignCenter,
-                display_title,
-            )
-
+                painter.setPen(TEXT_MAIN)
+            metrics = painter.fontMetrics()
+            display_title = metrics.elidedText(self.titles[index], Qt.ElideMiddle, list_width - 92)
+            painter.drawText(row.adjusted(24, 0, -70, 0), Qt.AlignLeft | Qt.AlignVCenter, display_title)
+            painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+            painter.setPen(GREEN_MAIN if selected else TEXT_DIM)
+            painter.drawText(row.adjusted(24, 0, -14, 0), Qt.AlignRight | Qt.AlignVCenter, f"{index + 1:02}")
+            painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
         painter.restore()
 
-        # =================================================
-        # SUBTLE CENTER MARKERS
-        # =================================================
+        painter.setPen(GREEN_DIM)
+        painter.drawLine(divider_x, content_top, divider_x, content_bottom)
+        if len(self.titles) > visible_rows:
+            track = QRect(divider_x - 10, content_top + 4, 3, max(1, content_bottom - content_top - 8))
+            thumb_h = max(22, int(track.height() * visible_rows / len(self.titles)))
+            max_start = max(1, len(self.titles) - visible_rows)
+            thumb_top = track.top() + int((track.height() - thumb_h) * start / max_start)
+            painter.fillRect(track, GREEN_DIM)
+            painter.fillRect(QRect(track.left(), thumb_top, track.width(), thumb_h), GREEN_MAIN)
 
-        painter.setPen(
-            GREEN_DIM
-        )
-
-        center_x = (
-            self.width() // 2
-        )
-
-        painter.drawLine(
-            center_x,
-            265,
-            center_x,
-            285,
-        )
-
-        painter.drawLine(
-            center_x,
-            495,
-            center_x,
-            515,
-        )
-
-        # =================================================
-        # FOOTER
-        # =================================================
-
-        painter.setPen(
-            GREEN_DIM
-        )
-
-        painter.drawLine(
-            60,
-            self.height() - 125,
-            self.width() - 60,
-            self.height() - 125,
-        )
-
-        painter.setFont(
-            QFont(
-                "DejaVu Sans Mono",
-                14,
-                QFont.Bold,
-            )
-        )
-
-        painter.setPen(
-            TEXT_DIM
-        )
-
-        painter.drawText(
-            QRect(
-                60,
-                self.height() - 98,
-                300,
-                50,
-            ),
-            Qt.AlignLeft
-            | Qt.AlignVCenter,
-            "LEFT/RIGHT // BROWSE",
-        )
-
-        action_label = "SELECT // PLAY"
-
-        painter.drawText(
-            QRect(
-                self.width() - 360,
-                self.height() - 98,
-                300,
-                50,
-            ),
-            Qt.AlignRight
-            | Qt.AlignVCenter,
-            action_label,
-        )
-
-        # =============================================
-        # COUNTER
-        # =============================================
-
-        painter.setPen(
-            GREEN_MAIN
-        )
-
-        counter = (
-            f"{self.selected_index + 1:02}"
-            f" // "
-            f"{len(self.titles):02}"
-        )
-
-        painter.drawText(
-            QRect(
-                self.width() // 2 - 100,
-                self.height() - 98,
-                200,
-                50,
-            ),
-            Qt.AlignCenter,
-            counter,
-        )
-
+        detail = QRect(detail_left, content_top, self.width() - detail_left - 60, content_bottom - content_top)
+        painter.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
+        painter.setPen(GREEN_BRIGHT)
+        painter.drawText(detail, Qt.AlignLeft | Qt.AlignTop, "ARCHIVE ENTRY")
+        painter.setFont(QFont("DejaVu Sans Mono", 16, QFont.Bold))
+        painter.setPen(TEXT_MAIN)
+        detail_metrics = painter.fontMetrics()
+        selected_title = self.titles[self.selected_index]
+        display_detail = detail_metrics.elidedText(selected_title, Qt.ElideMiddle, max(1, detail.width()))
+        painter.drawText(detail.adjusted(0, 58, 0, 0), Qt.AlignLeft | Qt.AlignTop, display_detail)
+        painter.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
+        painter.setPen(TEXT_DIM)
+        painter.drawText(detail.adjusted(0, 118, 0, 0), Qt.AlignLeft | Qt.AlignTop, f"FILE {self.selected_index + 1:02} / {len(self.titles):02}\nSELECT // PLAY")
+        painter.drawText(QRect(60, self.height() - 67, self.width() - 120, 26), Qt.AlignLeft | Qt.AlignBottom, "LEFT/RIGHT // BROWSE   SELECT // PLAY   HOLD SELECT: HOME")
 
 class TextPanelPage:
     """State + rendering for a scrollable text page."""
@@ -1651,7 +1246,7 @@ class MemoRenderer:
         painter.setPen(GREEN_DIM)
         painter.drawLine(410, left.top(), 410, left.bottom())
 
-        painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+        painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
         metrics = painter.fontMetrics()
         memo_rows = list(memos)
         row_height = 54
@@ -1680,21 +1275,38 @@ class MemoRenderer:
                 else GREEN_BRIGHT if selected
                 else TEXT_MAIN
             )
-            date = metrics.elidedText(item.get("date", "--"), Qt.ElideRight, left.width() - 32)
+            date_width = left.width() - 92 if unread else left.width() - 32
+            date = metrics.elidedText(item.get("date", "--"), Qt.ElideRight, date_width)
             painter.drawText(
-                QRect(left.left() + 24, y, left.width() - 32, 24),
+                QRect(left.left() + 24, y, date_width, row_height),
                 Qt.AlignLeft | Qt.AlignVCenter,
                 date,
             )
-            painter.setPen(GREEN_MAIN if selected else TEXT_DIM)
-            row_label = "UNREAD" if unread else "PRIVATE MEMO"
             if unread:
+                painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
                 painter.setPen(RED_BRIGHT)
-            painter.drawText(
-                QRect(left.left() + 24, y + 24, left.width() - 32, 22),
-                Qt.AlignLeft | Qt.AlignVCenter,
-                row_label,
+                painter.drawText(
+                    QRect(left.right() - 66, y, 54, row_height),
+                    Qt.AlignRight | Qt.AlignVCenter,
+                    "NEW",
+                )
+                painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
+
+        if len(memo_rows) > visible_memos:
+            list_track = QRect(left.right() - 5, left.top() + 4, 3, left.height() - 8)
+            thumb_height = max(22, int(list_track.height() * visible_memos / len(memo_rows)))
+            max_start = max(1, len(memo_rows) - visible_memos)
+            thumb_top = list_track.top() + int(
+                (list_track.height() - thumb_height) * start / max_start
             )
+            painter.fillRect(list_track, GREEN_DIM)
+            painter.fillRect(
+                QRect(list_track.left(), thumb_top, list_track.width(), thumb_height),
+                GREEN_MAIN,
+            )
+            painter.setPen(GREEN_MUTED)
+            painter.drawLine(list_track.left() - 2, list_track.top(), list_track.right() + 2, list_track.top())
+            painter.drawLine(list_track.left() - 2, list_track.bottom(), list_track.right() + 2, list_track.bottom())
 
         detail_title = "NO MEMOS"
         if memos:
@@ -1783,7 +1395,7 @@ class MemoRenderer:
         )
 
         if max_scroll > 0:
-            track = QRect(right.right() - 5, body.top(), 4, body.height())
+            track = QRect(right.right() - 6, body.top(), 4, body.height())
             thumb_height = max(24, int(track.height() * visible_lines / len(lines)))
             thumb_top = track.top() + int(
                 (track.height() - thumb_height) * host.memo_scroll / max_scroll
@@ -1793,6 +1405,9 @@ class MemoRenderer:
                 QRect(track.left(), thumb_top, track.width(), thumb_height),
                 GREEN_BRIGHT,
             )
+            painter.setPen(GREEN_MUTED)
+            painter.drawLine(track.left() - 2, track.top(), track.right() + 2, track.top())
+            painter.drawLine(track.left() - 2, track.bottom(), track.right() + 2, track.bottom())
 
         painter.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
         painter.setPen(TEXT_DIM)
