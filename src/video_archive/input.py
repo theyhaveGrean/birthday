@@ -1,5 +1,13 @@
 from gpiozero import Button
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, Signal, Slot
+
+INPUT_SIGNAL_EVENT = QEvent.Type(QEvent.registerEventType())
+
+
+class InputSignalEvent(QEvent):
+    def __init__(self, method_name):
+        super().__init__(INPUT_SIGNAL_EVENT)
+        self.method_name = method_name
 
 
 class InputController(QObject):
@@ -43,27 +51,64 @@ class InputController(QObject):
         self.right_button.when_released = self._right_released
 
     def _left_pressed(self):
-        self.left_pressed.emit()
+        self._post_signal("_emit_left_pressed")
 
     def _left_released(self):
-        self.left_released.emit()
+        self._post_signal("_emit_left_released")
 
     def _select_press_started(self):
         self._select_was_held = False
 
     def _select_held(self):
         self._select_was_held = True
-        self.select_held.emit()
+        self._post_signal("_emit_select_held")
 
     def _select_released(self):
         if not self._select_was_held:
-            self.select_pressed.emit()
+            self._post_signal("_emit_select_pressed")
         self._select_was_held = False
 
     def _right_pressed(self):
-        self.right_pressed.emit()
+        self._post_signal("_emit_right_pressed")
 
     def _right_released(self):
+        self._post_signal("_emit_right_released")
+
+    def _post_signal(self, method_name):
+        QCoreApplication.postEvent(
+            self,
+            InputSignalEvent(method_name),
+            Qt.HighEventPriority.value,
+        )
+
+    def event(self, event):
+        if event.type() == INPUT_SIGNAL_EVENT:
+            getattr(self, event.method_name)()
+            return True
+        return super().event(event)
+
+    @Slot()
+    def _emit_left_pressed(self):
+        self.left_pressed.emit()
+
+    @Slot()
+    def _emit_left_released(self):
+        self.left_released.emit()
+
+    @Slot()
+    def _emit_select_pressed(self):
+        self.select_pressed.emit()
+
+    @Slot()
+    def _emit_select_held(self):
+        self.select_held.emit()
+
+    @Slot()
+    def _emit_right_pressed(self):
+        self.right_pressed.emit()
+
+    @Slot()
+    def _emit_right_released(self):
         self.right_released.emit()
 
     def close(self):

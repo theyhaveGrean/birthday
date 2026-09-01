@@ -1,5 +1,7 @@
 import queue
 import struct
+import threading
+import time
 import wave
 from pathlib import Path
 
@@ -94,3 +96,36 @@ def test_notify_replaces_pending_click(tmp_path):
     controller.play("notify", ignore_enabled=True)
     name, _ = controller._play_queue.get_nowait()
     assert name == "notify"
+
+
+def test_wait_until_idle_waits_for_active_sfx(monkeypatch, tmp_path):
+    monkeypatch.setattr("video_archive.audio.shutil.which", lambda name: name)
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class WaitingAudioController(AudioController):
+        def _prepare_sounds(self):
+            self.sounds = {"click": tmp_path / "click.wav"}
+
+        def _play_file(self, name, path):
+            started.set()
+            assert release.wait(timeout=1.0)
+
+    controller = WaitingAudioController()
+    controller.play("click")
+    assert started.wait(timeout=1.0)
+
+    result = []
+    waiter = threading.Thread(
+        target=lambda: result.append(controller.wait_until_idle(timeout=1.0, settle=0)),
+    )
+    waiter.start()
+    time.sleep(0.05)
+
+    assert result == []
+
+    release.set()
+    waiter.join(timeout=1.0)
+
+    assert result == [True]

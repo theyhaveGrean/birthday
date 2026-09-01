@@ -8,6 +8,9 @@ import PySide6  # noqa: F401
 import video_archive.app as app
 
 
+APP_SOURCE = app.Path("src/video_archive/app.py").read_text()
+
+
 def test_load_videos_honors_order_and_appends_remaining(monkeypatch, tmp_path):
     video_dir = tmp_path / "normalized_videos"
     video_dir.mkdir()
@@ -124,6 +127,18 @@ def test_info_page_wraps_long_lines_to_panel_width():
     assert all(metrics.horizontalAdvance(line) <= 120 for line in lines)
 
 
+def test_fitted_memo_title_font_respects_width():
+    from PySide6.QtGui import QFontMetrics
+    from video_archive.ui import fitted_mono_font
+
+    font = fitted_mono_font("2026-08-31 10:00:00 EXTRA LONG MEMO TITLE", 220, 22, 11)
+
+    assert font.pointSize() < 22
+    assert QFontMetrics(font).horizontalAdvance(
+        "2026-08-31 10:00:00 EXTRA LONG MEMO TITLE"
+    ) <= 220 or font.pointSize() == 11
+
+
 def test_info_scroll_never_accumulates_past_bottom():
     from PySide6.QtGui import QImage, QPainter
     from video_archive.ui import TextPanelPage
@@ -224,6 +239,14 @@ def test_physical_select_hold_calls_global_home():
 
     app.VideoArchiveWindow._physical_select_held(FakeWindow())
     assert calls == [("activity", None), ("sound", "select"), ("home", None)]
+
+
+def test_video_playback_does_not_start_playback_flicker():
+    play_selected = APP_SOURCE.split("def play_selected", 1)[1].split(
+        "def _memo_read", 1
+    )[0]
+
+    assert "playback_page.start_effects()" not in play_selected
 
 
 def test_memo_refresh_preserves_reader_selection_by_id_and_scroll():

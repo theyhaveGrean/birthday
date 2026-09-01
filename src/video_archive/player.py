@@ -66,6 +66,8 @@ class MpvController(QObject):
             "--keep-open=yes",
             "--keepaspect=yes",
             "--loop-file=no",
+            "--ao=alsa",
+            "--audio-device=alsa/default",
             f"--input-ipc-server={self.socket_path}",
             "--force-window=yes",
             "--volume-max=150",

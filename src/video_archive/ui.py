@@ -116,6 +116,49 @@ def draw_text_glow(painter, rect, flags, text, font, color, glow_color):
     painter.drawText(rect, flags, text)
 
 
+def fitted_mono_font(text, width, starting_size, minimum_size=12):
+    size = starting_size
+    while size > minimum_size:
+        font = QFont("DejaVu Sans Mono", size, QFont.Bold)
+        if QFontMetrics(font).horizontalAdvance(text) <= width:
+            return font
+        size -= 1
+    return QFont("DejaVu Sans Mono", minimum_size, QFont.Bold)
+
+
+def draw_fitted_text(painter, rect, flags, text, starting_size, minimum_size=12):
+    painter.setFont(
+        fitted_mono_font(text, max(1, rect.width()), starting_size, minimum_size)
+    )
+    metrics = painter.fontMetrics()
+    painter.drawText(rect, flags, metrics.elidedText(text, Qt.ElideRight, rect.width()))
+
+
+def draw_fitted_wrapped_text(
+    painter,
+    rect,
+    flags,
+    text,
+    starting_size,
+    minimum_size=12,
+):
+    width = max(1, rect.width())
+    height = max(1, rect.height())
+    for size in range(starting_size, minimum_size - 1, -1):
+        font = QFont("DejaVu Sans Mono", size, QFont.Bold)
+        metrics = QFontMetrics(font)
+        if (
+            metrics.horizontalAdvance(text) <= width
+            or metrics.lineSpacing() * 2 <= height
+        ):
+            painter.setFont(font)
+            painter.drawText(rect, flags | Qt.TextWordWrap, text)
+            return
+
+    painter.setFont(QFont("DejaVu Sans Mono", minimum_size, QFont.Bold))
+    painter.drawText(rect, flags | Qt.TextWordWrap, text)
+
+
 def draw_tracking_glitch(painter, width, height, phase):
     if phase not in (11, 29):
         return
@@ -1246,8 +1289,6 @@ class MemoRenderer:
         painter.setPen(GREEN_DIM)
         painter.drawLine(410, left.top(), 410, left.bottom())
 
-        painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
-        metrics = painter.fontMetrics()
         memo_rows = list(memos)
         row_height = 54
         visible_memos = max(1, left.height() // row_height)
@@ -1276,11 +1317,14 @@ class MemoRenderer:
                 else TEXT_MAIN
             )
             date_width = left.width() - 92 if unread else left.width() - 32
-            date = metrics.elidedText(item.get("date", "--"), Qt.ElideRight, date_width)
-            painter.drawText(
-                QRect(left.left() + 24, y, date_width, row_height),
+            date_rect = QRect(left.left() + 24, y, date_width, row_height)
+            draw_fitted_wrapped_text(
+                painter,
+                date_rect.adjusted(0, 4, 0, -4),
                 Qt.AlignLeft | Qt.AlignVCenter,
-                date,
+                item.get("date", "--"),
+                18,
+                12,
             )
             if unread:
                 painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
@@ -1290,7 +1334,6 @@ class MemoRenderer:
                     Qt.AlignRight | Qt.AlignVCenter,
                     "NEW",
                 )
-                painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
 
         if len(memo_rows) > visible_memos:
             list_track = QRect(left.right() - 5, left.top() + 4, 3, left.height() - 8)
@@ -1314,9 +1357,15 @@ class MemoRenderer:
             if host.memo_reading:
                 detail_title = "READING MEMO"
 
-        painter.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
         painter.setPen(RED_BRIGHT if selected_unread and not host.memo_reading else GREEN_BRIGHT)
-        painter.drawText(right, Qt.AlignLeft | Qt.AlignTop, detail_title)
+        draw_fitted_text(
+            painter,
+            QRect(right.left(), right.top(), right.width(), 36),
+            Qt.AlignLeft | Qt.AlignTop,
+            detail_title,
+            20,
+            13,
+        )
 
         body = right.adjusted(0, 62, -16, -46)
         painter.setFont(QFont("DejaVu Sans Mono", 16, QFont.Bold))

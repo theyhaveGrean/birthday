@@ -5,6 +5,7 @@ import shutil
 import struct
 import subprocess
 import threading
+import time
 import wave
 from pathlib import Path
 
@@ -25,6 +26,7 @@ class AudioController:
         self.sounds = {}
         self._play_queue = queue.Queue(maxsize=1)
         self._worker = None
+        self._playing = threading.Event()
         self._scaled_cache = {}
         self._scaled_cache_dir = SOUND_DIR / ".scaled"
 
@@ -90,9 +92,29 @@ class AudioController:
         while True:
             name, path = self._play_queue.get()
             try:
+                self._playing.set()
                 self._play_file(name, path)
             finally:
+                self._playing.clear()
                 self._play_queue.task_done()
+
+    def wait_until_idle(self, timeout=1.0, settle=0.08):
+        """
+        Wait briefly for queued/currently playing SFX to release the ALSA device.
+        """
+        if not self.available or self._worker is None:
+            return True
+
+        deadline = time.monotonic() + max(0, timeout)
+
+        while time.monotonic() < deadline:
+            if self._play_queue.unfinished_tasks == 0 and not self._playing.is_set():
+                if settle > 0:
+                    time.sleep(settle)
+                return True
+            time.sleep(0.01)
+
+        return False
 
     def _play_file(self, name, path):
         playback_path = path

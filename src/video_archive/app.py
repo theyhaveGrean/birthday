@@ -1400,7 +1400,7 @@ class VideoArchiveWindow(QMainWindow):
         QApplication.processEvents()
 
         self.playback_watchdog.start()
-        self.playback_page.start_effects()
+        self.audio.wait_until_idle()
         self.player.preload(
             video_path,
             wid,
