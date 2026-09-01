@@ -23,6 +23,7 @@ from .cloud import (
     load_memos,
     load_read_memo_keys,
     mark_memo_read,
+    memo_key,
     unread_memo_count,
 )
 from .config import (
