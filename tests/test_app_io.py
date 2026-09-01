@@ -252,6 +252,71 @@ def test_memo_refresh_preserves_reader_selection_by_id_and_scroll():
     assert widget.memo_scroll == 4
 
 
+def test_cloud_message_finished_updates_memos_without_name_error(monkeypatch):
+    memo = {"id": "fresh", "date": "2026-08-31 10:03", "message": "fresh"}
+    calls = []
+
+    class FakeDisplay:
+        def wake(self):
+            calls.append("wake")
+
+    class FakeCounter:
+        def set_unread_memo_count(self, count):
+            calls.append(("unread", count))
+
+    class FakeConfig:
+        showing_admin = False
+        showing_about = False
+
+        def set_memo(self, message, memo_date):
+            calls.append(("memo", message, memo_date))
+
+        def set_memos(self, memos):
+            calls.append(("memos", memos))
+
+        def set_read_memo_keys(self, keys):
+            calls.append(("read", keys))
+
+        def set_cloud_status(self, status, error=""):
+            calls.append(("cloud", status, error))
+
+    class FakeTimer:
+        def setInterval(self, interval):
+            calls.append(("interval", interval))
+
+    class FakeWindow:
+        _wake_display_for_memo = app.VideoArchiveWindow._wake_display_for_memo
+        _play_memo_chime = lambda self: calls.append("chime")
+        _restart_memo_chime_interval = lambda self: calls.append("restart_chime")
+        _update_memo_chime_timer = lambda self: calls.append("update_chime")
+
+        def __init__(self):
+            self.cloud_message_running = True
+            self.memo_reset_pending = False
+            self.memos = []
+            self.settings = {"wake_on_memo": True, "memo_chime_enabled": False}
+            self.gallery = FakeCounter()
+            self.home = FakeCounter()
+            self.config_page = FakeConfig()
+            self.display = FakeDisplay()
+            self.cloud_message_timer = FakeTimer()
+            self.cloud_last_logged_error = ""
+            self.cloud_last_error_log_monotonic = 0.0
+
+    monkeypatch.setattr(app, "load_cached_message_date", lambda: memo["date"])
+    monkeypatch.setattr(app, "load_memos", lambda: [memo])
+    monkeypatch.setattr(app, "load_read_memo_keys", lambda: set())
+    monkeypatch.setattr(app, "unread_memo_count", lambda memos: len(memos))
+
+    fake = FakeWindow()
+    app.VideoArchiveWindow._cloud_message_finished(fake, memo["message"], "")
+
+    assert fake.cloud_message_running is False
+    assert fake.cloud_status == "SYNCED"
+    assert fake.memos == [memo]
+    assert ("memos", [memo]) in calls
+
+
 def test_wifi_scan_clears_stale_results_and_late_result_does_not_eject_password():
     widget = _config_widget()
     widget.showing_wifi = True

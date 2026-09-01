@@ -273,14 +273,20 @@ The submenu contains:
 
 ### Brightness
 
-Sets the desired normal display brightness.
+Sets the physical LCD backlight brightness from **5% to 100%**.
 
-The software-side brightness control and persistence are implemented.
+The app talks directly to the LCDWiki 5inch HDMI Display-D / QDtech MPI5001
+USB HID controller (`0484:5750`). Brightness is persisted in `settings.json`
+and reapplied when the app starts or wakes the display. Device discovery is
+by USB VID/PID, so the app does not depend on a fixed `/dev/hidrawN` number.
 
-> **Hardware note:** The final display-specific USB dimming backend
-> still needs to be connected to the brightness controller. Until that
-> backend is implemented, changing the setting may not physically change
-> the LCD backlight.
+On a new Raspberry Pi install, run the one-time permission setup:
+
+```sh
+sudo ./deployment/install_display_brightness.sh
+```
+
+Then reboot (or log out/in) once. The app itself should **not** be run as root.
 
 ### Sleep After
 

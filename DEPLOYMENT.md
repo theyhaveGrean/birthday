@@ -17,6 +17,23 @@ GPIO mapping:
 - select: GPIO 17
 - right / next: GPIO 22
 
+
+## LCD USB brightness permissions
+
+The LCDWiki 5inch HDMI Display-D is controlled through its QDtech MPI5001
+USB HID interface (`0484:5750`). Install the repository's udev rule once:
+
+```sh
+cd /home/pi/app
+sudo ./deployment/install_display_brightness.sh
+```
+
+Reboot once after installation so the `pi` user's `plugdev` membership is
+active. The rule grants only this display's hidraw device to `plugdev`; do not
+run the whole GUI as root. The application discovers the correct `/dev/hidrawN`
+by VID/PID on every connection and automatically re-discovers it after a
+disconnect/reconnect.
+
 ## Recommended crash recovery
 
 For deployment, point the X session at `run_app.sh` instead of invoking

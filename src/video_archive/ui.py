@@ -1937,7 +1937,7 @@ class ConfigWidget(QWidget):
         self.sfx_enabled = bool(sfx_enabled)
         self.memo_chime_enabled = bool(memo_chime_enabled)
         self.wake_on_memo = bool(wake_on_memo)
-        self.brightness = max(1, min(100, int(brightness)))
+        self.brightness = max(5, min(100, int(brightness)))
         self.sleep_timeout_minutes = max(1, min(60, int(sleep_timeout_minutes)))
         self.screen = ConfigScreen.SETTINGS
         self.selected_index = 0
@@ -2183,7 +2183,7 @@ class ConfigWidget(QWidget):
         self.update()
 
     def set_brightness(self, brightness):
-        self.brightness = max(1, min(100, int(brightness)))
+        self.brightness = max(5, min(100, int(brightness)))
         self.update()
 
     def set_sleep_timeout(self, minutes):

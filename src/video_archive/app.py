@@ -23,6 +23,7 @@ from .cloud import (
     load_memos,
     load_read_memo_keys,
     mark_memo_read,
+    memo_key,
     unread_memo_count,
 )
 from .config import (
@@ -177,7 +178,7 @@ def load_settings():
         settings.get("volume"), 0, 100, DEFAULT_SETTINGS["volume"]
     )
     settings["brightness"] = clamp_int_or_default(
-        settings.get("brightness"), 1, 100, DEFAULT_SETTINGS["brightness"]
+        settings.get("brightness"), 5, 100, DEFAULT_SETTINGS["brightness"]
     )
     settings["sleep_timeout_minutes"] = clamp_int_or_default(
         settings.get("sleep_timeout_minutes"),
@@ -1491,7 +1492,7 @@ class VideoArchiveWindow(QMainWindow):
 
     def _set_brightness(self, brightness):
         previous = self.settings["brightness"]
-        self.settings["brightness"] = clamp_int(brightness, 1, 100)
+        self.settings["brightness"] = clamp_int(brightness, 5, 100)
         try:
             save_settings(self.settings)
         except OSError as error:

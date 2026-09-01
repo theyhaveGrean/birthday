@@ -1,0 +1,3 @@
+# LCDWiki 5inch HDMI Display-D / QDtech MPI5001 USB brightness control.
+# Allow members of the plugdev group to access only this HID device.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0484", ATTRS{idProduct}=="5750", GROUP="plugdev", MODE="0660"
