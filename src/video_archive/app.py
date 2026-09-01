@@ -43,6 +43,7 @@ from .input import InputController
 from .player import MpvController
 from .storage import atomic_write_json, clamp_int, clamp_int_or_default, coerce_bool
 from .ui import (
+    AmbientSleepWidget,
     ConfigWidget,
     GalleryWidget,
     HomeWidget,
@@ -766,6 +767,8 @@ class VideoArchiveWindow(QMainWindow):
         self.start_screen = StartScreenWidget()
 
         self.home = HomeWidget(self.unread_memos)
+        self.ambient_sleep = AmbientSleepWidget()
+        self.ambient_sleep.set_unread_memo_count(self.unread_memos)
 
         self.gallery = GalleryWidget(
             self.titles,
@@ -794,6 +797,7 @@ class VideoArchiveWindow(QMainWindow):
         self.home.flicker_timer.stop()
         self.gallery.flicker_timer.stop()
         self.config_page.flicker_timer.stop()
+        self.ambient_sleep.stop()
 
         self.pages = QStackedWidget()
 
@@ -803,6 +807,10 @@ class VideoArchiveWindow(QMainWindow):
 
         self.pages.addWidget(
             self.home
+        )
+
+        self.pages.addWidget(
+            self.ambient_sleep
         )
 
         self.pages.addWidget(
@@ -1054,14 +1062,19 @@ class VideoArchiveWindow(QMainWindow):
         self.display_sleep_timer.start(max(1000, timeout_ms))
 
     def _resume_visible_effects(self):
+        self.ambient_sleep.stop()
         if self.mode == "start":
             self.start_screen.flicker_timer.start(90)
+            self.pages.setCurrentWidget(self.start_screen)
         elif self.mode == "home":
             self.home.flicker_timer.start(90)
+            self.pages.setCurrentWidget(self.home)
         elif self.mode == "gallery":
             self.gallery.flicker_timer.start(90)
+            self.pages.setCurrentWidget(self.gallery)
         elif self.mode == "config":
             self.config_page.flicker_timer.start(90)
+            self.pages.setCurrentWidget(self.config_page)
             if self.config_page.showing_about:
                 self.about_refresh_timer.start()
 
@@ -1070,6 +1083,7 @@ class VideoArchiveWindow(QMainWindow):
         self.home.flicker_timer.stop()
         self.gallery.flicker_timer.stop()
         self.config_page.flicker_timer.stop()
+        self.ambient_sleep.stop()
         self.about_refresh_timer.stop()
 
     def _note_activity(self):
@@ -1087,6 +1101,9 @@ class VideoArchiveWindow(QMainWindow):
             return
         self.display.sleep()
         self._pause_visible_effects()
+        self.ambient_sleep.set_unread_memo_count(self.unread_memos)
+        self.ambient_sleep.start()
+        self.pages.setCurrentWidget(self.ambient_sleep)
 
     def _physical_left(self):
         self._note_activity()
@@ -1406,6 +1423,7 @@ class VideoArchiveWindow(QMainWindow):
         self.unread_memos = unread_memo_count(self.memos)
         self.gallery.set_unread_memo_count(self.unread_memos)
         self.home.set_unread_memo_count(self.unread_memos)
+        self.ambient_sleep.set_unread_memo_count(self.unread_memos)
         self.config_page.set_read_memo_keys(load_read_memo_keys())
         self._update_memo_chime_timer()
 
@@ -1568,6 +1586,7 @@ class VideoArchiveWindow(QMainWindow):
             self.unread_memos = unread_memo_count(self.memos)
             self.gallery.set_unread_memo_count(self.unread_memos)
             self.home.set_unread_memo_count(self.unread_memos)
+            self.ambient_sleep.set_unread_memo_count(self.unread_memos)
             self.config_page.set_memo(self.memo, self.memo_date)
             self.config_page.set_memos(self.memos)
             self.config_page.set_read_memo_keys(load_read_memo_keys())
@@ -2272,6 +2291,7 @@ class VideoArchiveWindow(QMainWindow):
         self.unread_memos = 0
         self.gallery.set_unread_memo_count(0)
         self.home.set_unread_memo_count(0)
+        self.ambient_sleep.set_unread_memo_count(0)
         self.config_page.clear_memo_data()
         self._update_memo_chime_timer()
 

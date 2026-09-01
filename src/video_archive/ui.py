@@ -486,8 +486,8 @@ class HomeWidget(QWidget):
             draw_static_slices(painter, self.width(), self.height(), self.flicker_phase)
         apply_text_flicker(painter, self.text_flicker, self.flicker_phase)
 
-        painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
-        painter.setPen(GREEN_BRIGHT)
+        painter.setFont(QFont("DejaVu Sans Mono", 17, QFont.Bold))
+        painter.setPen(GREEN_MAIN)
         painter.drawText(60, 82, "4AUTUMN.EXE // HOME")
         painter.setPen(TEXT_DIM)
         painter.drawText(
@@ -555,6 +555,64 @@ class HomeWidget(QWidget):
             painter.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
             painter.setPen(RED_BRIGHT)
             painter.drawText(badge, Qt.AlignCenter, "UNREAD")
+
+
+class AmbientSleepWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.phase = 0
+        self.unread_memo_count = 0
+        self.setFocusPolicy(Qt.NoFocus)
+        self.setCursor(Qt.BlankCursor)
+
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._advance)
+
+    def _advance(self):
+        self.phase += 1
+        self.update()
+
+    def start(self):
+        if not self.timer.isActive():
+            self.timer.start(1000)
+
+    def stop(self):
+        self.timer.stop()
+
+    def set_unread_memo_count(self, count):
+        self.unread_memo_count = max(0, int(count))
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
+        painter.fillRect(self.rect(), BG)
+
+        for y in range(0, self.height(), 24):
+            painter.fillRect(0, y, self.width(), 3, QColor("#060A06"))
+
+        pulse = self.phase % 4 in (0, 1)
+        text_color = TEXT_DIM if pulse else GREEN_DIM
+        status = "SLEEP // AMBIENT"
+        if self.unread_memo_count:
+            status = f"SLEEP // {self.unread_memo_count} MEMO"
+
+        painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+        painter.setPen(text_color)
+        painter.drawText(
+            QRect(0, self.height() // 2 - 16, self.width(), 32),
+            Qt.AlignCenter,
+            status,
+        )
+
+        painter.setFont(QFont("DejaVu Sans Mono", 8, QFont.Bold))
+        painter.setPen(GREEN_DIM)
+        painter.drawText(
+            QRect(0, self.height() // 2 + 18, self.width(), 24),
+            Qt.AlignCenter,
+            "PRESS ANY BUTTON",
+        )
 
 
 class GalleryWidget(QWidget):
@@ -851,7 +909,7 @@ class GalleryWidget(QWidget):
         painter.setFont(
             QFont(
                 "DejaVu Sans Mono",
-                15,
+                17,
                 QFont.Bold,
             )
         )
@@ -863,7 +921,7 @@ class GalleryWidget(QWidget):
         painter.drawText(
             60,
             82,
-            "4AUTUMN.EXE",
+            "4AUTUMN.EXE // GALLERY",
         )
 
         painter.setPen(
@@ -872,31 +930,14 @@ class GalleryWidget(QWidget):
 
         painter.drawText(
             QRect(
-                self.width() - 300,
-                48,
-                240,
-                26,
+                self.width() - 330,
+                55,
+                270,
+                35,
             ),
             Qt.AlignRight
             | Qt.AlignVCenter,
-            "LOCAL // READY",
-        )
-
-        cloud_color = (
-            GREEN_MAIN
-            if self.cloud_status == "SYNCED"
-            else GREEN_BRIGHT
-            if self.cloud_status == "CHECKING"
-            else RED_MAIN
-            if self.cloud_status in ("OFFLINE", "ERROR")
-            else TEXT_DIM
-        )
-        painter.setPen(cloud_color)
-        painter.setFont(QFont("DejaVu Sans Mono", 10, QFont.Bold))
-        painter.drawText(
-            QRect(self.width() - 300, 72, 240, 22),
-            Qt.AlignRight | Qt.AlignVCenter,
-            f"CLOUD // {self.cloud_status}",
+            "LOCAL // GALLERY",
         )
 
         painter.setPen(
