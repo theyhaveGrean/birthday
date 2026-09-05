@@ -1,19 +1,16 @@
 import hashlib
 import json
-import os
-from datetime import datetime
-from email.utils import parsedate_to_datetime
-from urllib.error import URLError
+import threading
+import uuid
+from datetime import datetime, timezone
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
-import uuid
-import threading
 
 from .config import (
     CLOUD_MEMOS_FILE,
     CLOUD_MESSAGE_FILE,
     CLOUD_MESSAGE_META_FILE,
-    CLOUD_MESSAGE_TOKEN_FILE,
     READ_MEMOS_FILE,
 )
 from .storage import atomic_write_json, atomic_write_text
@@ -21,7 +18,10 @@ from .storage import atomic_write_json, atomic_write_text
 MAX_MESSAGE_CHARS = 1200
 FETCH_TIMEOUT_SECONDS = 6
 MAX_MEMOS = 100
-GITHUB_TOKEN_HOSTS = {"github.com", "api.github.com", "raw.githubusercontent.com"}
+MAX_RESPONSE_BYTES = 256 * 1024
+SUPABASE_NOTES_URL = "https://rrwyqfddvijgimcslqkl.supabase.co/rest/v1/notes"
+SUPABASE_PUBLISHABLE_KEY = "sb_publishable_2Iurrigf7zF0by-BWoKE3g_IAT76514"
+SUPABASE_NOTES_SELECT = "id,name,message,created_at"
 MIN_SANE_YEAR = 2020
 _MEMO_STATE_LOCK = threading.RLock()
 
@@ -36,7 +36,7 @@ def _load_json_file(path, default):
 def _legacy_memo_key(memo):
     date = str(memo.get("date", "")).strip()
     message = str(memo.get("message", "")).strip()
-    payload = f"{date}\0{message}".encode("utf-8")
+    payload = f"{date}\0{message}".encode()
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -124,7 +124,7 @@ def load_cached_message_date():
 
     try:
         timestamp = CLOUD_MESSAGE_FILE.stat().st_mtime
-        value = datetime.fromtimestamp(timestamp)
+        value = datetime.fromtimestamp(timestamp, timezone.utc)
     except (OSError, ValueError, OverflowError):
         return ""
 
@@ -132,19 +132,7 @@ def load_cached_message_date():
 
 
 def _memo_timestamp(value=None):
-    return _format_sane_datetime(value or datetime.now())
-
-
-def _response_timestamp(response):
-    # Prefer the server's HTTP Date header. This avoids bogus 1970-era
-    # timestamps when a Raspberry Pi boots before NTP has synchronized.
-    raw_date = response.headers.get("Date", "").strip()
-    if raw_date:
-        try:
-            return _memo_timestamp(parsedate_to_datetime(raw_date))
-        except (TypeError, ValueError, OverflowError):
-            pass
-    return _memo_timestamp()
+    return _format_sane_datetime(value or datetime.now(timezone.utc))
 
 
 def load_memos():
@@ -166,6 +154,9 @@ def load_memos():
                     "date": str(item.get("date", "")).strip() or "--",
                     "message": message,
                 }
+                name = str(item.get("name", "")).strip()
+                if name:
+                    normalized["name"] = name
                 if not normalized["id"]:
                     # Stable migration keeps legacy read-state valid.
                     normalized["id"] = _legacy_memo_key(normalized)
@@ -201,7 +192,7 @@ def save_memos(memos):
         prune_read_memo_keys(memos)
 
 
-def archive_memo(message, memo_date=None, allow_duplicate_top=False):
+def archive_memo(message, memo_date=None, allow_duplicate_top=False, memo_id=None, name=""):
     message = message.strip()
     with _MEMO_STATE_LOCK:
         if not message:
@@ -217,14 +208,14 @@ def archive_memo(message, memo_date=None, allow_duplicate_top=False):
         ):
             return memos
 
-        memos.insert(
-            0,
-            {
-                "id": uuid.uuid4().hex,
-                "date": memo_date or _memo_timestamp(),
-                "message": message,
-            },
-        )
+        item = {
+            "id": str(memo_id or uuid.uuid4().hex),
+            "date": memo_date or _memo_timestamp(),
+            "message": message,
+        }
+        if name:
+            item["name"] = str(name).strip()
+        memos.insert(0, item)
         save_memos(memos)
         return memos
 
@@ -242,35 +233,12 @@ def save_cached_message(message, received_at=None):
     return True
 
 
-def load_cloud_message_token():
-    token = os.environ.get("CLOUD_MESSAGE_TOKEN", "").strip()
-    if token:
-        return token
-
-    if not CLOUD_MESSAGE_TOKEN_FILE.exists():
-        return ""
-
-    try:
-        return CLOUD_MESSAGE_TOKEN_FILE.read_text().strip()
-    except OSError:
-        return ""
-
-
-def _fresh_fetch_url(url):
-    """Bypass intermediary caches for GitHub raw content.
-
-    The app uses raw.githubusercontent.com for memo delivery. A successful
-    HTTP request can otherwise still return a recently cached version of the
-    file. A unique query value forces each poll to be a distinct CDN request.
-    Other endpoints are left unchanged so arbitrary configured APIs do not
-    receive an unexpected query parameter.
-    """
-    parts = urlsplit(url)
-    if parts.hostname != "raw.githubusercontent.com":
-        return url
-
-    query = parse_qsl(parts.query, keep_blank_values=True)
-    query.append(("_memo_poll", uuid.uuid4().hex))
+def _supabase_notes_url(url=None):
+    base = (url or SUPABASE_NOTES_URL).strip() or SUPABASE_NOTES_URL
+    parts = urlsplit(base)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["select"] = SUPABASE_NOTES_SELECT
+    query["order"] = "created_at.desc"
     return urlunsplit((
         parts.scheme,
         parts.netloc,
@@ -280,56 +248,102 @@ def _fresh_fetch_url(url):
     ))
 
 
-def fetch_cloud_message(url):
-    headers = {
-        "User-Agent": "4autumn-video-archive/1.0",
-        "Cache-Control": "no-cache, no-store, max-age=0",
-        "Pragma": "no-cache",
-    }
-    token = load_cloud_message_token()
+def _format_note_date(value):
+    value = str(value or "").strip()
+    if not value:
+        return _memo_timestamp()
     try:
-        hostname = (urlsplit(url).hostname or "").lower()
-    except ValueError as error:
-        return None, str(error)
-    # .cloud_message_token is documented as a GitHub credential. Never send
-    # it to arbitrary configured endpoints. Generic authenticated APIs should
-    # use a separate credential mechanism instead.
-    if token and hostname in GITHUB_TOKEN_HOSTS:
-        headers["Authorization"] = f"Bearer {token}"
+        normalized = value.replace("Z", "+00:00")
+        return _memo_timestamp(datetime.fromisoformat(normalized))
+    except ValueError:
+        return value[:16] or _memo_timestamp()
 
-    try:
-        request = Request(
-            _fresh_fetch_url(url),
-            headers=headers,
-        )
-        with urlopen(request, timeout=FETCH_TIMEOUT_SECONDS) as response:
-            # UTF-8 can use up to four bytes per Unicode code point. Read
-            # enough bytes to enforce the documented limit by characters after
-            # decoding rather than accidentally treating bytes as characters.
-            raw = response.read(MAX_MESSAGE_CHARS * 4 + 4)
-            received_at = _response_timestamp(response)
-    except (OSError, URLError, ValueError) as error:
-        return None, str(error)
 
-    message = raw.decode("utf-8", errors="replace").strip()
+def _normalize_note_row(row):
+    if not isinstance(row, dict):
+        return None
+
+    message = str(row.get("message", "")).strip()
+    if not message:
+        return None
     if len(message) > MAX_MESSAGE_CHARS:
         message = message[:MAX_MESSAGE_CHARS].rstrip()
 
+    memo_id = str(row.get("id", "")).strip()
+    normalized = {
+        "id": memo_id or uuid.uuid4().hex,
+        "date": _format_note_date(row.get("created_at")),
+        "message": message,
+    }
+    name = str(row.get("name", "")).strip()
+    if name:
+        normalized["name"] = name
+    return normalized
+
+
+def _sync_supabase_notes(rows):
+    memos = []
+    seen_keys = set()
+    for row in rows:
+        memo = _normalize_note_row(row)
+        if not memo:
+            continue
+        key = memo_key(memo)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        memos.append(memo)
+        if len(memos) >= MAX_MEMOS:
+            break
+
+    save_memos(memos)
+    newest = memos[0] if memos else None
+    if newest:
+        save_cached_message(newest["message"], newest["date"])
+        return newest["message"]
+
+    save_cached_message("", _memo_timestamp())
+    return ""
+
+
+def _http_error_body(error):
     try:
-        cache_existed = CLOUD_MESSAGE_FILE.exists()
-        previous_message = load_cached_message()
-        if message and message != previous_message:
-            # If the cache explicitly held an empty remote state, reposting
-            # identical text is a new occurrence even when the archive's top
-            # historical memo has the same body. A missing cache on first boot
-            # does not force a duplicate.
-            archive_memo(
-                message,
-                memo_date=received_at,
-                allow_duplicate_top=cache_existed and previous_message == "",
-            )
-        save_cached_message(message, received_at)
+        body = error.read(MAX_RESPONSE_BYTES).decode("utf-8", errors="replace").strip()
+    except OSError:
+        body = ""
+    return f"HTTP {error.code}: {body}" if body else f"HTTP {error.code}"
+
+
+def fetch_cloud_message(url=None):
+    headers = {
+        "User-Agent": "4autumn-video-archive/1.0",
+        "apikey": SUPABASE_PUBLISHABLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_PUBLISHABLE_KEY}",
+        "Content-Type": "application/json",
+    }
+    try:
+        request = Request(
+            _supabase_notes_url(url),
+            headers=headers,
+        )
+        with urlopen(request, timeout=FETCH_TIMEOUT_SECONDS) as response:
+            raw = response.read(MAX_RESPONSE_BYTES)
+    except HTTPError as error:
+        return None, _http_error_body(error)
+    except (OSError, URLError, ValueError) as error:
+        return None, str(error)
+
+    try:
+        rows = json.loads(raw.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError as error:
+        return None, f"invalid JSON response: {error}"
+
+    if not isinstance(rows, list):
+        return None, "invalid notes response: expected a JSON array"
+
+    try:
+        message = _sync_supabase_notes(rows)
     except OSError as error:
-        return message, str(error)
+        return None, str(error)
 
     return message, ""

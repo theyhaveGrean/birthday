@@ -11,7 +11,6 @@ CLOUD_MESSAGE_FILE = APP_DIR / ".cloud_message.txt"
 CLOUD_MESSAGE_META_FILE = APP_DIR / ".cloud_message_meta.json"
 CLOUD_MEMOS_FILE = APP_DIR / "memos.json"
 READ_MEMOS_FILE = APP_DIR / ".read_memos.json"
-CLOUD_MESSAGE_TOKEN_FILE = APP_DIR / ".cloud_message_token"
 
 ANIMATION_STEPS = 4
 ANIMATION_STEP_MS = 55

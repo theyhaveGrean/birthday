@@ -1368,6 +1368,19 @@ class MemoRenderer:
         )
 
         body = right.adjusted(0, 62, -16, -46)
+        author = str(selected_memo.get("name", "")).strip()
+        if author and memos and (host.memo_reading or not selected_unread):
+            painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
+            painter.setPen(TEXT_DIM)
+            draw_fitted_text(
+                painter,
+                QRect(body.left(), body.top() - 28, body.width(), 22),
+                Qt.AlignLeft | Qt.AlignVCenter,
+                f"FROM // {author}",
+                18,
+                10,
+            )
+
         painter.setFont(QFont("DejaVu Sans Mono", 16, QFont.Bold))
         painter.setPen(TEXT_MAIN if host.memo_reading else TEXT_DIM)
         metrics = painter.fontMetrics()

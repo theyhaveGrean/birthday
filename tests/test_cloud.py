@@ -2,7 +2,7 @@ import json
 import os
 import time
 
-import video_archive.cloud as cloud
+from video_archive import cloud
 
 
 def _redirect_cloud_files(monkeypatch, tmp_path):
@@ -10,7 +10,6 @@ def _redirect_cloud_files(monkeypatch, tmp_path):
     monkeypatch.setattr(cloud, "CLOUD_MESSAGE_META_FILE", tmp_path / ".cloud_message_meta.json")
     monkeypatch.setattr(cloud, "CLOUD_MEMOS_FILE", tmp_path / "memos.json")
     monkeypatch.setattr(cloud, "READ_MEMOS_FILE", tmp_path / ".read_memos.json")
-    monkeypatch.setattr(cloud, "CLOUD_MESSAGE_TOKEN_FILE", tmp_path / ".cloud_message_token")
 
 
 def test_cached_message_is_not_rewritten_when_unchanged(monkeypatch, tmp_path):
@@ -131,18 +130,26 @@ def test_legacy_memo_read_key_survives_id_migration(monkeypatch, tmp_path):
     assert cloud.unread_memo_count(memos) == 0
 
 
-def test_unicode_limit_is_in_characters_not_bytes(monkeypatch, tmp_path):
+def test_supabase_notes_are_synced_to_local_memos(monkeypatch, tmp_path):
     _redirect_cloud_files(monkeypatch, tmp_path)
+    captured = {}
 
-    class Headers(dict):
-        def get(self, key, default=None):
-            return super().get(key, default)
+    payload = json.dumps([
+        {
+            "id": "note-2",
+            "name": "Autumn",
+            "message": "newest",
+            "created_at": "2026-08-31T23:00:00+00:00",
+        },
+        {
+            "id": "note-1",
+            "name": "Adityan",
+            "message": "older",
+            "created_at": "2026-08-31T22:59:00+00:00",
+        },
+    ]).encode("utf-8")
 
     class Response:
-        def __init__(self, payload):
-            self.payload = payload
-            self.headers = Headers({"Date": "Mon, 31 Aug 2026 23:00:00 GMT"})
-
         def __enter__(self):
             return self
 
@@ -150,12 +157,63 @@ def test_unicode_limit_is_in_characters_not_bytes(monkeypatch, tmp_path):
             return False
 
         def read(self, size=-1):
-            return self.payload[:size] if size >= 0 else self.payload
+            return payload
 
-    payload = ("😀" * 1300).encode("utf-8")
-    monkeypatch.setattr(cloud, "urlopen", lambda request, timeout: Response(payload))
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        return Response()
 
-    message, error = cloud.fetch_cloud_message("https://example.invalid/message")
+    monkeypatch.setattr(cloud, "urlopen", fake_urlopen)
+    message, error = cloud.fetch_cloud_message()
+
+    assert error == ""
+    assert message == "newest"
+    assert captured["url"] == (
+        "https://rrwyqfddvijgimcslqkl.supabase.co/rest/v1/notes?"
+        "select=id%2Cname%2Cmessage%2Ccreated_at&order=created_at.desc"
+    )
+    assert captured["headers"]["Apikey"] == cloud.SUPABASE_PUBLISHABLE_KEY
+    assert captured["headers"]["Authorization"] == (
+        f"Bearer {cloud.SUPABASE_PUBLISHABLE_KEY}"
+    )
+    assert cloud.load_cached_message() == "newest"
+    assert cloud.load_cached_message_date() == (
+        cloud._format_note_date("2026-08-31T23:00:00+00:00")
+    )
+    assert cloud.load_memos() == [
+        {
+            "id": "note-2",
+            "date": cloud._format_note_date("2026-08-31T23:00:00+00:00"),
+            "message": "newest",
+            "name": "Autumn",
+        },
+        {
+            "id": "note-1",
+            "date": cloud._format_note_date("2026-08-31T22:59:00+00:00"),
+            "message": "older",
+            "name": "Adityan",
+        },
+    ]
+
+
+def test_supabase_message_limit_is_in_characters(monkeypatch, tmp_path):
+    _redirect_cloud_files(monkeypatch, tmp_path)
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def read(self, size=-1):
+            return json.dumps([
+                {
+                    "id": "note-1",
+                    "message": "😀" * 1300,
+                    "created_at": "2026-08-31T23:00:00+00:00",
+                },
+            ]).encode("utf-8")
+
+    monkeypatch.setattr(cloud, "urlopen", lambda request, timeout: Response())
+    message, error = cloud.fetch_cloud_message()
 
     assert error == ""
     assert len(message) == cloud.MAX_MESSAGE_CHARS
@@ -178,45 +236,16 @@ def test_same_text_after_explicit_blank_can_be_new_occurrence(monkeypatch, tmp_p
     assert len({memo["id"] for memo in memos}) == 2
 
 
-def test_github_token_is_not_sent_to_unrelated_host(monkeypatch, tmp_path):
+def test_invalid_supabase_json_returns_error(monkeypatch, tmp_path):
     _redirect_cloud_files(monkeypatch, tmp_path)
-    cloud.CLOUD_MESSAGE_TOKEN_FILE.write_text("secret-token")
-    captured = {}
 
     class Response:
-        headers = {}
         def __enter__(self): return self
         def __exit__(self, *args): return False
-        def read(self, size=-1): return b"hello"
+        def read(self, size=-1): return b"{not json"
 
-    def fake_urlopen(request, timeout):
-        captured["headers"] = dict(request.header_items())
-        return Response()
+    monkeypatch.setattr(cloud, "urlopen", lambda request, timeout: Response())
+    message, error = cloud.fetch_cloud_message()
 
-    monkeypatch.setattr(cloud, "urlopen", fake_urlopen)
-    message, error = cloud.fetch_cloud_message("https://example.invalid/message")
-    assert error == ""
-    assert message == "hello"
-    assert "Authorization" not in captured["headers"]
-
-
-def test_github_token_is_sent_to_trusted_github_host(monkeypatch, tmp_path):
-    _redirect_cloud_files(monkeypatch, tmp_path)
-    cloud.CLOUD_MESSAGE_TOKEN_FILE.write_text("secret-token")
-    captured = {}
-
-    class Response:
-        headers = {}
-        def __enter__(self): return self
-        def __exit__(self, *args): return False
-        def read(self, size=-1): return b"hello"
-
-    def fake_urlopen(request, timeout):
-        captured["headers"] = dict(request.header_items())
-        return Response()
-
-    monkeypatch.setattr(cloud, "urlopen", fake_urlopen)
-    message, error = cloud.fetch_cloud_message("https://raw.githubusercontent.com/o/r/main/memo.txt")
-    assert error == ""
-    assert message == "hello"
-    assert captured["headers"].get("Authorization") == "Bearer secret-token"
+    assert message is None
+    assert "invalid JSON response" in error
