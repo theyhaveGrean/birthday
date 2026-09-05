@@ -1,5 +1,8 @@
+import os
 import random
 from collections import deque
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PySide6.QtCore import QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
@@ -9,6 +12,8 @@ from .cloud import memo_key
 from .config import (
     ANIMATION_STEP_MS,
     ANIMATION_STEPS,
+    DEFAULT_SCREENSAVER_MODE,
+    SCREENSAVER_MODES,
 )
 
 # =========================================================
@@ -33,6 +38,9 @@ RED_BG = QColor("#16090A")
 TEXT_MAIN = QColor("#A8DFA3")
 TEXT_DIM = QColor("#577A55")
 
+TIMEZONE_ENV = "VIDEO_ARCHIVE_TIMEZONE"
+DEFAULT_CLOCK_TIMEZONE = "America/Los_Angeles"
+
 
 # =========================================================
 # LAYOUT
@@ -51,7 +59,12 @@ MIN_TITLE_FONT_SIZE = 18
 HOME_APPS = ("GALLERY", "MEMOS", "SETTINGS")
 SETTINGS_MENU = ("INFO", "WIFI", "SOUNDS", "DISPLAY", "ABOUT", "REBOOT", "BACK")
 SOUNDS_MENU = ("MASTER VOLUME", "SFX", "MEMO CHIME", "BACK")
-DISPLAY_MENU = ("BRIGHTNESS", "SLEEP AFTER", "WAKE ON MEMO", "BACK")
+DISPLAY_MENU = ("BRIGHTNESS", "SLEEP AFTER", "WAKE ON MEMO", "SCREENSAVER", "BACK")
+SCREENSAVER_LABELS = {
+    "default": "DEFAULT",
+    "clock": "RETRO CLOCK",
+    "black": "BLACK",
+}
 ADMIN_ACTIONS = ("STATUS", "RESET WIFI", "RESET MEMOS", "BACK")
 WIFI_SAVED_ACTIONS = ("CONNECT", "FORGET", "BACK")
 
@@ -157,6 +170,16 @@ def draw_fitted_wrapped_text(
 
     painter.setFont(QFont("DejaVu Sans Mono", minimum_size, QFont.Bold))
     painter.drawText(rect, flags | Qt.TextWordWrap, text)
+
+
+def current_clock_time():
+    timezone_name = os.environ.get(TIMEZONE_ENV, DEFAULT_CLOCK_TIMEZONE).strip()
+    if timezone_name:
+        try:
+            return datetime.now(ZoneInfo(timezone_name))
+        except ZoneInfoNotFoundError:
+            pass
+    return datetime.now(timezone.utc).astimezone()
 
 
 def draw_tracking_glitch(painter, width, height, phase):
@@ -644,10 +667,12 @@ class HomeWidget(QWidget):
 
 
 class AmbientSleepWidget(QWidget):
-    def __init__(self, parent=None):
+    def __init__(self, mode=DEFAULT_SCREENSAVER_MODE, parent=None):
         super().__init__(parent)
         self.phase = 0
         self.unread_memo_count = 0
+        self.mode = DEFAULT_SCREENSAVER_MODE
+        self.set_mode(mode)
         self.setFocusPolicy(Qt.NoFocus)
         self.setCursor(Qt.BlankCursor)
 
@@ -669,14 +694,68 @@ class AmbientSleepWidget(QWidget):
         self.unread_memo_count = max(0, int(count))
         self.update()
 
+    def set_mode(self, mode):
+        if mode not in SCREENSAVER_MODES:
+            mode = DEFAULT_SCREENSAVER_MODE
+        self.mode = mode
+        self.update()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, False)
         painter.setRenderHint(QPainter.TextAntialiasing, True)
+
+        if self.mode == "black":
+            painter.fillRect(self.rect(), Qt.black)
+            return
+
         painter.fillRect(self.rect(), BG)
 
         for y in range(0, self.height(), 24):
             painter.fillRect(0, y, self.width(), 3, QColor("#060A06"))
+
+        if self.mode == "clock":
+            now = current_clock_time()
+            clock_text = now.strftime("%H:%M")
+            seconds_text = now.strftime("%S")
+            date_text = now.strftime("%a %d %b").upper()
+
+            clock_font = fitted_mono_font(clock_text, max(1, self.width() - 120), 118, 42)
+            painter.setFont(clock_font)
+            painter.setPen(GREEN_BRIGHT)
+            clock_rect = QRect(0, self.height() // 2 - 115, self.width(), 140)
+            draw_text_glow(
+                painter,
+                clock_rect,
+                Qt.AlignCenter,
+                clock_text,
+                clock_font,
+                GREEN_BRIGHT,
+                GREEN_DIM,
+            )
+
+            painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
+            painter.setPen(TEXT_DIM)
+            painter.drawText(
+                QRect(0, self.height() // 2 + 12, self.width(), 36),
+                Qt.AlignCenter,
+                f":{seconds_text}",
+            )
+            painter.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
+            painter.setPen(GREEN_MUTED)
+            painter.drawText(
+                QRect(0, self.height() // 2 + 56, self.width(), 32),
+                Qt.AlignCenter,
+                date_text,
+            )
+            if self.unread_memo_count:
+                painter.setPen(RED_BRIGHT)
+                painter.drawText(
+                    QRect(0, self.height() // 2 + 92, self.width(), 28),
+                    Qt.AlignCenter,
+                    f"{self.unread_memo_count} UNREAD MEMO",
+                )
+            return
 
         pulse = self.phase % 4 in (0, 1)
         text_color = TEXT_DIM if pulse else GREEN_DIM
@@ -1136,13 +1215,26 @@ class SettingsRenderer:
             else:
                 detail_text = "SELECT TO RETURN TO SETTINGS"
         elif widget.settings_section == "display":
-            detail_title = ("DISPLAY LEVEL", "DISPLAY SLEEP", "DISPLAY WAKE", "RETURN")[widget.selected_index]
+            detail_title = (
+                "DISPLAY LEVEL",
+                "DISPLAY SLEEP",
+                "DISPLAY WAKE",
+                "SCREENSAVER",
+                "RETURN",
+            )[widget.selected_index]
             if widget.selected_index == 0:
                 detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_brightness else f"BRIGHTNESS // {widget.brightness:03}%"
             elif widget.selected_index == 1:
                 detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_sleep_timeout else f"SLEEP AFTER // {widget.sleep_timeout_minutes} MIN"
             elif widget.selected_index == 2:
                 detail_text = "WAKE ON MEMO // ENABLED" if widget.wake_on_memo else "WAKE ON MEMO // DISABLED"
+            elif widget.selected_index == 3:
+                mode = SCREENSAVER_LABELS[widget.screensaver_mode]
+                detail_text = (
+                    f"MODE // {mode}\nLEFT/RIGHT CHOOSE   SELECT DONE"
+                    if widget.editing_screensaver
+                    else f"MODE // {mode}"
+                )
             else:
                 detail_text = "SELECT TO RETURN TO SETTINGS"
         else:
@@ -1155,7 +1247,7 @@ class SettingsRenderer:
             elif widget.selected_index == 2:
                 detail_text = "MASTER VOLUME // SFX // MEMO CHIME"
             elif widget.selected_index == 3:
-                detail_text = "BRIGHTNESS // SLEEP // WAKE ON MEMO"
+                detail_text = "BRIGHTNESS // SLEEP // SCREENSAVER"
             elif widget.selected_index == 4:
                 detail_text = "DEVICE // NETWORK // STORAGE // CLOUD"
             elif widget.selected_index == 5 and widget.reboot_status:
@@ -1215,6 +1307,8 @@ class SettingsRenderer:
             widget._draw_settings_toggle(painter, detail, widget.sfx_enabled if widget.selected_index == 1 else widget.memo_chime_enabled)
         elif widget.settings_section == "display" and widget.selected_index == 2:
             widget._draw_settings_toggle(painter, detail, widget.wake_on_memo)
+        elif widget.settings_section == "display" and widget.selected_index == 3:
+            widget._draw_screensaver_selector(painter, detail)
 
         if widget.settings_section is None and widget.selected_index == 5:
             painter.setFont(QFont("DejaVu Sans Mono", 14, QFont.Bold))
@@ -1823,6 +1917,7 @@ class ConfigWidget(QWidget):
     sfx_changed = Signal(bool)
     memo_chime_changed = Signal(bool)
     wake_on_memo_changed = Signal(bool)
+    screensaver_changed = Signal(str)
     brightness_changed = Signal(int)
     sleep_timeout_changed = Signal(int)
     wifi_scan_requested = Signal()
@@ -1835,7 +1930,20 @@ class ConfigWidget(QWidget):
     memo_read = Signal(object)
     about_opened = Signal()
 
-    def __init__(self, note, memo, memo_date, memos, volume, sfx_enabled, memo_chime_enabled, wake_on_memo, brightness, sleep_timeout_minutes):
+    def __init__(
+        self,
+        note,
+        memo,
+        memo_date,
+        memos,
+        volume,
+        sfx_enabled,
+        memo_chime_enabled,
+        wake_on_memo,
+        brightness,
+        sleep_timeout_minutes,
+        screensaver_mode=DEFAULT_SCREENSAVER_MODE,
+    ):
         super().__init__()
 
         self.note = note
@@ -1851,12 +1959,14 @@ class ConfigWidget(QWidget):
         self.wake_on_memo = bool(wake_on_memo)
         self.brightness = max(5, min(100, int(brightness)))
         self.sleep_timeout_minutes = max(1, min(60, int(sleep_timeout_minutes)))
+        self.screensaver_mode = self._clean_screensaver_mode(screensaver_mode)
         self.screen = ConfigScreen.SETTINGS
         self.selected_index = 0
         self.settings_section = None
         self.editing_volume = False
         self.editing_brightness = False
         self.editing_sleep_timeout = False
+        self.editing_screensaver = False
         self.confirming_reboot = False
         self.reboot_status = ""
         self.reboot_busy = False
@@ -1893,6 +2003,20 @@ class ConfigWidget(QWidget):
         self.flicker_timer = QTimer(self)
         self.flicker_timer.timeout.connect(self._advance_flicker)
         self.flicker_timer.start(90)
+
+    @staticmethod
+    def _clean_screensaver_mode(mode):
+        if isinstance(mode, str):
+            mode = mode.strip().lower()
+            if mode in SCREENSAVER_MODES:
+                return mode
+        return DEFAULT_SCREENSAVER_MODE
+
+    def _cycle_screensaver_mode(self, direction):
+        modes = list(SCREENSAVER_MODES)
+        index = modes.index(self.screensaver_mode)
+        self.screensaver_mode = modes[(index + direction) % len(modes)]
+        self.screensaver_changed.emit(self.screensaver_mode)
 
     @property
     def showing_info(self):
@@ -2016,6 +2140,7 @@ class ConfigWidget(QWidget):
         self.editing_volume = False
         self.editing_brightness = False
         self.editing_sleep_timeout = False
+        self.editing_screensaver = False
         self.confirming_reboot = False
         self.update()
 
@@ -2025,6 +2150,7 @@ class ConfigWidget(QWidget):
         self.editing_volume = False
         self.editing_brightness = False
         self.editing_sleep_timeout = False
+        self.editing_screensaver = False
         self.confirming_reboot = False
         self.memo_reading = False
         self.memo_selected_index = min(
@@ -2039,6 +2165,7 @@ class ConfigWidget(QWidget):
             and not self.editing_volume
             and not self.editing_brightness
             and not self.editing_sleep_timeout
+            and not self.editing_screensaver
             and not self.confirming_reboot
         )
 
@@ -2101,6 +2228,10 @@ class ConfigWidget(QWidget):
 
     def set_sleep_timeout(self, minutes):
         self.sleep_timeout_minutes = max(1, min(60, int(minutes)))
+        self.update()
+
+    def set_screensaver_mode(self, mode):
+        self.screensaver_mode = self._clean_screensaver_mode(mode)
         self.update()
 
     def set_wifi_status(self, status):
@@ -2231,6 +2362,8 @@ class ConfigWidget(QWidget):
         elif self.editing_sleep_timeout:
             self.set_sleep_timeout(self.sleep_timeout_minutes - 1)
             self.sleep_timeout_changed.emit(self.sleep_timeout_minutes)
+        elif self.editing_screensaver:
+            self._cycle_screensaver_mode(-1)
         else:
             self.confirming_reboot = False
             self.selected_index = (
@@ -2279,6 +2412,8 @@ class ConfigWidget(QWidget):
         elif self.editing_sleep_timeout:
             self.set_sleep_timeout(self.sleep_timeout_minutes + 1)
             self.sleep_timeout_changed.emit(self.sleep_timeout_minutes)
+        elif self.editing_screensaver:
+            self._cycle_screensaver_mode(1)
         else:
             self.confirming_reboot = False
             self.selected_index = (
@@ -2349,8 +2484,13 @@ class ConfigWidget(QWidget):
             elif self.selected_index == 2:
                 self.wake_on_memo = not self.wake_on_memo
                 self.wake_on_memo_changed.emit(self.wake_on_memo)
+            elif self.selected_index == 3:
+                self.editing_screensaver = not self.editing_screensaver
             else:
                 self.settings_section = None
+                self.editing_brightness = False
+                self.editing_sleep_timeout = False
+                self.editing_screensaver = False
                 self.selected_index = 3
         elif self.selected_index == 0:
             self.showing_info = True
@@ -2601,6 +2741,34 @@ class ConfigWidget(QWidget):
             max(1, detail.right() - toggle.right() - 18), toggle.height(),
         )
         painter.drawText(label_rect, Qt.AlignLeft | Qt.AlignVCenter, "SELECT TO TOGGLE")
+
+    def _draw_screensaver_selector(self, painter, detail):
+        modes = list(SCREENSAVER_MODES)
+        gap = 10
+        option_width = max(72, (detail.width() - gap * (len(modes) - 1)) // len(modes))
+        top = detail.top() + 132
+        for index, mode in enumerate(modes):
+            rect = QRect(detail.left() + index * (option_width + gap), top, option_width, 38)
+            selected = mode == self.screensaver_mode
+            painter.setPen(GREEN_BRIGHT if selected else GREEN_DIM)
+            if selected:
+                painter.fillRect(rect.adjusted(2, 2, -2, -2), GREEN_DIM)
+            painter.drawRect(rect)
+            painter.setFont(QFont("DejaVu Sans Mono", 11, QFont.Bold))
+            painter.setPen(GREEN_BRIGHT if selected else TEXT_DIM)
+            painter.drawText(
+                rect.adjusted(6, 0, -6, 0),
+                Qt.AlignCenter,
+                SCREENSAVER_LABELS[mode],
+            )
+
+        painter.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
+        painter.setPen(GREEN_BRIGHT if self.editing_screensaver else TEXT_DIM)
+        painter.drawText(
+            QRect(detail.left(), top + 54, detail.width(), 30),
+            Qt.AlignCenter,
+            "EDITING" if self.editing_screensaver else "SELECT TO EDIT",
+        )
 
     def paintEvent(self, event):
         painter = QPainter(self)

@@ -31,10 +31,12 @@ from .config import (
     CLOUD_MESSAGE_FILE,
     CLOUD_MESSAGE_META_FILE,
     DEFAULT_NOTE,
+    DEFAULT_SCREENSAVER_MODE,
     DEFAULT_SETTINGS,
     NOTE_FILE,
     ORDER_FILE,
     READ_MEMOS_FILE,
+    SCREENSAVER_MODES,
     SETTINGS_FILE,
     VIDEO_DIR,
 )
@@ -61,6 +63,14 @@ VIDEO_EXTENSIONS = {".mp4", ".mov"}
 MAX_MPV_VOLUME = 150
 CLOUD_POLL_MS = 60000
 CLOUD_RETRY_MS = 15000
+
+
+def normalize_screensaver_mode(value):
+    if isinstance(value, str):
+        mode = value.strip().lower()
+        if mode in SCREENSAVER_MODES:
+            return mode
+    return DEFAULT_SCREENSAVER_MODE
 
 
 def _split_nmcli_terse(line):
@@ -199,6 +209,9 @@ def load_settings():
     )
     settings["wake_on_memo"] = coerce_bool(
         settings.get("wake_on_memo"), DEFAULT_SETTINGS["wake_on_memo"]
+    )
+    settings["screensaver_mode"] = normalize_screensaver_mode(
+        settings.get("screensaver_mode")
     )
     cloud_url = settings.get("cloud_message_url", "")
     settings["cloud_message_url"] = (
@@ -768,7 +781,7 @@ class VideoArchiveWindow(QMainWindow):
         self.start_screen = StartScreenWidget()
 
         self.home = HomeWidget(self.unread_memos)
-        self.ambient_sleep = AmbientSleepWidget()
+        self.ambient_sleep = AmbientSleepWidget(self.settings["screensaver_mode"])
         self.ambient_sleep.set_unread_memo_count(self.unread_memos)
 
         self.gallery = GalleryWidget(
@@ -788,6 +801,7 @@ class VideoArchiveWindow(QMainWindow):
             self.settings["wake_on_memo"],
             self.settings["brightness"],
             self.settings["sleep_timeout_minutes"],
+            self.settings["screensaver_mode"],
         )
         self.config_page.set_read_memo_keys(load_read_memo_keys())
         self.config_page.set_cloud_status(self.cloud_status, self.cloud_error)
@@ -893,6 +907,10 @@ class VideoArchiveWindow(QMainWindow):
         )
         self.config_page.wake_on_memo_changed.connect(
             self._set_wake_on_memo
+        )
+
+        self.config_page.screensaver_changed.connect(
+            self._set_screensaver_mode
         )
 
         self.config_page.brightness_changed.connect(
@@ -1103,6 +1121,7 @@ class VideoArchiveWindow(QMainWindow):
         self.display.sleep()
         self._pause_visible_effects()
         self.ambient_sleep.set_unread_memo_count(self.unread_memos)
+        self.ambient_sleep.set_mode(self.settings["screensaver_mode"])
         self.ambient_sleep.start()
         self.pages.setCurrentWidget(self.ambient_sleep)
 
@@ -1288,6 +1307,7 @@ class VideoArchiveWindow(QMainWindow):
         self.config_page.set_sfx_enabled(self.settings["sfx_enabled"])
         self.config_page.set_memo_chime_enabled(self.settings["memo_chime_enabled"])
         self.config_page.set_wake_on_memo(self.settings["wake_on_memo"])
+        self.config_page.set_screensaver_mode(self.settings["screensaver_mode"])
 
     def _open_memos(self):
         self.mode = "config"
@@ -1540,6 +1560,20 @@ class VideoArchiveWindow(QMainWindow):
             self.config_page.set_sleep_timeout(previous)
             print(f"failed to save sleep timeout setting: {error}", flush=True)
             return
+        self._restart_display_sleep_timer()
+
+    def _set_screensaver_mode(self, mode):
+        mode = normalize_screensaver_mode(mode)
+        previous = self.settings["screensaver_mode"]
+        self.settings["screensaver_mode"] = mode
+        try:
+            save_settings(self.settings)
+        except OSError as error:
+            self.settings["screensaver_mode"] = previous
+            self.config_page.set_screensaver_mode(previous)
+            print(f"failed to save screensaver setting: {error}", flush=True)
+            return
+        self.ambient_sleep.set_mode(mode)
         self._restart_display_sleep_timer()
 
     def _refresh_cloud_message(self):

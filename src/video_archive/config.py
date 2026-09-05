@@ -14,6 +14,8 @@ READ_MEMOS_FILE = APP_DIR / ".read_memos.json"
 
 ANIMATION_STEPS = 4
 ANIMATION_STEP_MS = 55
+SCREENSAVER_MODES = ("default", "clock", "black")
+DEFAULT_SCREENSAVER_MODE = "default"
 
 DEFAULT_SETTINGS = {
     "volume": 80,
@@ -22,6 +24,7 @@ DEFAULT_SETTINGS = {
     "wake_on_memo": True,
     "brightness": 80,
     "sleep_timeout_minutes": 5,
+    "screensaver_mode": DEFAULT_SCREENSAVER_MODE,
     "cloud_message_url": "",
 }
 

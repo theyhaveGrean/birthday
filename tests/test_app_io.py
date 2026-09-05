@@ -64,7 +64,7 @@ def test_corrupt_brightness_and_booleans_fall_back_safely(monkeypatch, tmp_path)
     settings_file.write_text(
         '{"brightness": null, "volume": "nope", "sfx_enabled": "false", '
         '"memo_chime_enabled": "on", "wake_on_memo": "garbage", '
-        '"cloud_message_url": null}'
+        '"screensaver_mode": "snow", "cloud_message_url": null}'
     )
     monkeypatch.setattr(app, "SETTINGS_FILE", settings_file)
 
@@ -74,6 +74,7 @@ def test_corrupt_brightness_and_booleans_fall_back_safely(monkeypatch, tmp_path)
     assert settings["sfx_enabled"] is False
     assert settings["memo_chime_enabled"] is True
     assert settings["wake_on_memo"] == app.DEFAULT_SETTINGS["wake_on_memo"]
+    assert settings["screensaver_mode"] == app.DEFAULT_SETTINGS["screensaver_mode"]
     assert settings["cloud_message_url"] == ""
 
 
@@ -95,6 +96,9 @@ def test_admin_chord_is_blocked_while_display_values_are_editing():
     assert widget.can_open_admin() is False
     widget.editing_brightness = False
     widget.editing_sleep_timeout = True
+    assert widget.can_open_admin() is False
+    widget.editing_sleep_timeout = False
+    widget.editing_screensaver = True
     assert widget.can_open_admin() is False
 
 
@@ -189,10 +193,32 @@ def test_settings_sounds_and_display_back_navigation():
     widget.selected_index = 3
     widget.select()
     assert widget.settings_section == "display"
-    widget.selected_index = 3
+    widget.selected_index = 4
     widget.select()
     assert widget.settings_section is None
     assert widget.selected_index == 3
+
+
+def test_display_settings_selects_screensaver_mode():
+    widget = _config_widget()
+    widget.show_settings_home()
+    widget.selected_index = 3
+    widget.select()
+    widget.selected_index = 3
+
+    emitted = []
+    widget.screensaver_changed.connect(lambda mode: emitted.append(mode))
+    widget.select()
+    assert widget.editing_screensaver is True
+    widget.move_right()
+    assert widget.screensaver_mode == "clock"
+    widget.move_right()
+    assert widget.screensaver_mode == "black"
+    widget.move_left()
+    assert widget.screensaver_mode == "clock"
+    widget.select()
+    assert widget.editing_screensaver is False
+    assert emitted == ["clock", "black", "clock"]
 
 
 def test_wifi_back_returns_to_settings_screen():

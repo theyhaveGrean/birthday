@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from video_archive.display import DisplayController
 
 
@@ -19,7 +17,7 @@ def test_sleep_dims_to_minimum_and_wake_restores_brightness():
 
     display.sleep()
     assert display.sleeping is True
-    assert display.writes[-1] == display.MIN_BRIGHTNESS
+    assert display.writes[-1] == 0
 
     assert display.wake() is True
     assert display.sleeping is False
@@ -47,8 +45,8 @@ def test_usb_packet_matches_manufacturer_protocol():
 def test_usb_packet_brightness_range_and_scaling():
     assert DisplayController._encode_packet(100)[6] == 90
     assert DisplayController._encode_packet(10)[6] == 9
-    # The manufacturer utility's safe minimum is 5%.
-    assert DisplayController._encode_packet(1)[6] == 4
+    assert DisplayController._encode_packet(0)[6] == 0
+    assert DisplayController._encode_packet(1)[6] == 0
 
 
 def test_device_path_override_writes_packet(monkeypatch, tmp_path):

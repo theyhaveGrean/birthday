@@ -19,7 +19,8 @@ from .storage import clamp_int
 class DisplayController:
     """Own the configured brightness and write it to the physical backlight."""
 
-    MIN_BRIGHTNESS = 5
+    MIN_BRIGHTNESS = 0
+    MIN_CONFIGURED_BRIGHTNESS = 5
     MAX_BRIGHTNESS = 100
 
     USB_VENDOR_ID = 0x0484
@@ -35,7 +36,7 @@ class DisplayController:
 
     def __init__(self, brightness=80):
         self._brightness = clamp_int(
-            brightness, self.MIN_BRIGHTNESS, self.MAX_BRIGHTNESS
+            brightness, self.MIN_CONFIGURED_BRIGHTNESS, self.MAX_BRIGHTNESS
         )
         self._sleeping = False
         self._device_path: Path | None = None
@@ -57,7 +58,7 @@ class DisplayController:
 
     def set_brightness(self, brightness):
         self._brightness = clamp_int(
-            brightness, self.MIN_BRIGHTNESS, self.MAX_BRIGHTNESS
+            brightness, self.MIN_CONFIGURED_BRIGHTNESS, self.MAX_BRIGHTNESS
         )
         if not self._sleeping:
             self.apply_brightness(self._brightness)
