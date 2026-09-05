@@ -55,7 +55,7 @@ class MpvController(QObject):
         #  - embedding into the Qt native child window
         #  - loading paused behind the transition
         #  - IPC control
-        volume = clamp_int(volume, 0, 150)
+        volume = clamp_int(volume, 0, 100)
 
         args = [
             "mpv",
@@ -70,7 +70,7 @@ class MpvController(QObject):
             "--audio-device=alsa/default",
             f"--input-ipc-server={self.socket_path}",
             "--force-window=yes",
-            "--volume-max=150",
+            "--volume-max=100",
             f"--volume={volume}",
             "--af=lavfi=[highpass=f=180,dynaudnorm=f=250:g=15:p=0.95:m=20]",
             str(path),
@@ -128,10 +128,10 @@ class MpvController(QObject):
         )
 
     def set_volume(self, volume):
-        volume = clamp_int(volume, 0, 150)
+        volume = clamp_int(volume, 0, 100)
 
         self.command(
-            ["set_property", "volume-max", 150]
+            ["set_property", "volume-max", 100]
         )
         self.command(
             ["set_property", "volume", volume]

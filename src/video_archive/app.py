@@ -727,6 +727,7 @@ class VideoArchiveWindow(QMainWindow):
         self.mpv_started = False
         self.transition_minimum_elapsed = False
         self.return_pending = False
+        self.return_target = "gallery"
         self.playback_generation = 0
         self.wifi_scan_running = False
         self.wifi_connect_running = False
@@ -1309,8 +1310,16 @@ class VideoArchiveWindow(QMainWindow):
             return
 
         previous_mode = self.mode
-        # Change mode first so asynchronous mpv ended/failed callbacks cannot
-        # start a gallery return transition while a global Home jump is active.
+        if previous_mode in ("loading", "playing", "returning"):
+            self.gallery.cancel_navigation()
+            self.config_page.flicker_timer.stop()
+            self.about_refresh_timer.stop()
+            if previous_mode == "returning" and self.return_pending:
+                self.return_target = "home"
+                return
+            self._begin_return(target="home")
+            return
+
         self.mode = "home"
 
         # Make Home visible immediately. mpv cleanup can take over a second in
@@ -1323,16 +1332,6 @@ class VideoArchiveWindow(QMainWindow):
         self.home.flicker_timer.start(90)
         self.pages.setCurrentWidget(self.home)
         QApplication.processEvents()
-
-        if previous_mode in ("loading", "playing", "returning"):
-            self.playback_generation += 1
-            self.playback_watchdog.stop()
-            self.playback_page.hide_transition()
-            self.playback_page.hide_video_surface()
-            self.playback_page.stop_effects()
-            self.return_pending = False
-            self.pending_index = None
-            self.player.stop(silent=True)
 
     # =====================================================
     # START VIDEO
@@ -2477,11 +2476,12 @@ class VideoArchiveWindow(QMainWindow):
         if self.mode == "playing":
             self._begin_return()
 
-    def _begin_return(self):
+    def _begin_return(self, target="gallery"):
         if self.return_pending:
             return
 
         self.return_pending = True
+        self.return_target = target
         self.mode = "returning"
         self.playback_generation += 1
         self.playback_watchdog.stop()
@@ -2512,16 +2512,24 @@ class VideoArchiveWindow(QMainWindow):
         if self.mode != "returning" or not self.return_pending:
             return
 
-        self.pages.setCurrentWidget(self.gallery)
+        if self.return_target == "home":
+            self.gallery.flicker_timer.stop()
+            self.home.flicker_timer.start(90)
+            self.pages.setCurrentWidget(self.home)
+            self.mode = "home"
+        else:
+            self.pages.setCurrentWidget(self.gallery)
+            self.mode = "gallery"
+            self.gallery.cancel_navigation()
+            if not self.display.sleeping:
+                self.gallery.flicker_timer.start(90)
+
         self.playback_page.hide_transition()
         self.playback_page.stop_effects()
 
         self.return_pending = False
-        self.mode = "gallery"
-        self.gallery.cancel_navigation()
+        self.return_target = "gallery"
         self._restart_display_sleep_timer()
-        if not self.display.sleeping:
-            self.gallery.flicker_timer.start(90)
 
 
     # =====================================================
