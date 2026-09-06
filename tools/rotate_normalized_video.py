@@ -9,8 +9,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = PROJECT_ROOT / "src"
 sys.path.insert(0, str(SRC_DIR))
 
-from video_archive.config import VIDEO_DIR
-
 
 ROTATE_FILTERS = {
     "clockwise": "transpose=1",
@@ -104,23 +102,11 @@ def rotate_normalized_video(args):
         )
         return 1
 
-    width, height = probe_video_size(source)
-    expected_width = int(args.width)
-    expected_height = int(args.height)
-
-    if (width, height) == (expected_width, expected_height):
+    try:
+        width, height = probe_video_size(source)
+    except RuntimeError as error:
         print(
-            f"SKIP {source.name}: already {expected_width}x{expected_height}"
-        )
-        return 0
-
-    if (width, height) != (expected_height, expected_width):
-        print(
-            (
-                f"FAILED {source.name}: found {width}x{height}, expected "
-                f"{expected_height}x{expected_width} for a rotated "
-                f"{expected_width}x{expected_height} video"
-            ),
+            f"FAILED {source.name}: {error}",
             file=sys.stderr,
         )
         return 1
@@ -130,7 +116,7 @@ def rotate_normalized_video(args):
     command = build_ffmpeg_command(source, target, rotate_filter)
 
     print(
-        f"ROTATE {source.name}: {width}x{height} -> {expected_width}x{expected_height}"
+        f"ROTATE {source.name}: {width}x{height} {args.direction}"
     )
     print(
         " ".join(command)
@@ -162,30 +148,18 @@ def rotate_normalized_video(args):
 def parse_args():
     parser = argparse.ArgumentParser(
         description=(
-            "Rotate one normalized video only when its dimensions match the "
-            "expected landscape resolution swapped into portrait orientation."
+            "Rotate one video in place, preserving audio and re-encoding the "
+            "video stream."
         )
     )
     parser.add_argument(
         "video",
-        help="Video filename inside normalized_videos, or an absolute path.",
+        help="Video path, or a filename inside --video-dir.",
     )
     parser.add_argument(
         "--video-dir",
-        default=str(VIDEO_DIR),
-        help="Directory containing normalized videos.",
-    )
-    parser.add_argument(
-        "--width",
-        type=int,
-        default=1024,
-        help="Expected final landscape width.",
-    )
-    parser.add_argument(
-        "--height",
-        type=int,
-        default=576,
-        help="Expected final landscape height.",
+        default=".",
+        help="Directory used for relative video filenames.",
     )
     parser.add_argument(
         "--direction",
