@@ -67,9 +67,9 @@ FONT_WEIGHT = QFont.Bold
 # One set of metrics for every selectable list rendered in the left pane.
 # Keep these values shared so a change cannot make Gallery, Memos, or Settings
 # drift apart again.
-LEFT_PANE_FONT_SIZE = 18
-LEFT_PANE_ROW_HEIGHT = 54
-LEFT_PANE_ROW_GAP = 8
+LEFT_PANE_FONT_SIZE = 20
+LEFT_PANE_ROW_HEIGHT = 56
+LEFT_PANE_ROW_GAP = 4
 LEFT_PANE_ROW_STEP = LEFT_PANE_ROW_HEIGHT + LEFT_PANE_ROW_GAP
 LEFT_PANE_TEXT_INSET = 24
 
@@ -210,15 +210,23 @@ def draw_fitted_wrapped_text(
     starting_size,
     minimum_size=12,
 ):
-    # Keep the legacy helper name for callers, but use the same fixed metrics
-    # as every other left-pane label. The old implementation silently changed
-    # the font size per memo/date, which was another source of visual drift.
-    painter.setFont(left_pane_font())
-    painter.drawText(
-        rect,
-        flags | Qt.TextWordWrap | Qt.TextWrapAnywhere,
-        str(text),
+    # Keep the legacy helper name for callers, but make the rendered value a
+    # single line. Left-pane labels must not roll into a neighbouring row.
+    painter.setFont(
+        fitted_mono_font(str(text), max(1, rect.width()), starting_size, minimum_size)
     )
+    painter.drawText(rect, flags, str(text))
+
+
+def memo_date_parts(value):
+    """Return the memo timestamp as separate, compact date and time lines."""
+    text = str(value or "--").strip()
+    if not text:
+        return "--", "--"
+    parts = text.replace("T", " ", 1).split(None, 1)
+    date = parts[0]
+    time = parts[1].split()[0] if len(parts) > 1 else "--"
+    return date, time
 
 
 def current_clock_time():
@@ -1442,7 +1450,8 @@ class MemoRenderer:
 
         memo_rows = list(memos)
         row_height = LEFT_PANE_ROW_HEIGHT
-        visible_memos = max(1, left.height() // row_height)
+        row_step = LEFT_PANE_ROW_STEP
+        visible_memos = max(1, (left.height() + LEFT_PANE_ROW_GAP) // row_step)
         start = max(
             0,
             min(
@@ -1452,7 +1461,7 @@ class MemoRenderer:
         )
         for index, item in enumerate(memo_rows[start : start + visible_memos], start=start):
             selected = index == host.memo_selected_index
-            y = left.top() + (index - start) * row_height
+            y = left.top() + (index - start) * row_step
             unread = memo_key(item) not in host.read_memo_keys
             if selected:
                 painter.fillRect(
@@ -1468,14 +1477,26 @@ class MemoRenderer:
                 else TEXT_MAIN
             )
             date_width = left.width() - 92 if unread else left.width() - 32
-            date_rect = QRect(left.left() + 24, y, date_width, row_height)
+            date, time = memo_date_parts(item.get("date", "--"))
+            date_rect = QRect(left.left() + 24, y + 3, date_width, 27)
             draw_fitted_wrapped_text(
                 painter,
-                date_rect.adjusted(0, 4, 0, -4),
+                date_rect,
                 Qt.AlignLeft | Qt.AlignVCenter,
-                item.get("date", "--"),
-                LEFT_PANE_FONT_SIZE,
-                LEFT_PANE_FONT_SIZE,
+                date,
+                16,
+                10,
+            )
+            painter.setFont(fitted_mono_font(time, max(1, date_width), 12, 9))
+            painter.setPen(
+                RED_BRIGHT if selected and unread
+                else GREEN_MAIN if selected
+                else TEXT_DIM
+            )
+            painter.drawText(
+                QRect(left.left() + 24, y + 29, date_width, 20),
+                Qt.AlignLeft | Qt.AlignVCenter,
+                time,
             )
             if unread:
                 painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
@@ -2028,6 +2049,7 @@ class ConfigWidget(QWidget):
         self.reboot_status = ""
         self.reboot_busy = False
         self.wifi_stage = "networks"
+        self.wifi_session = 0
         self.wifi_networks = []
         self.wifi_selected_index = 0
         self.wifi_password = ""
@@ -2191,6 +2213,7 @@ class ConfigWidget(QWidget):
         self.update()
 
     def show_settings_home(self):
+        self.wifi_session += 1
         self.screen = ConfigScreen.SETTINGS
         self.selected_index = 0
         self.settings_section = None
@@ -2202,6 +2225,7 @@ class ConfigWidget(QWidget):
         self.update()
 
     def show_memos_home(self):
+        self.wifi_session += 1
         self.screen = ConfigScreen.MEMOS
         self.settings_section = None
         self.editing_volume = False
@@ -2316,6 +2340,7 @@ class ConfigWidget(QWidget):
         self.update()
 
     def begin_wifi_scan(self):
+        self.wifi_session += 1
         # Never leave a previous scan selectable while a fresh scan is active.
         # A late scan result must also never eject the user from password/saved
         # profile screens.
@@ -2600,6 +2625,7 @@ class ConfigWidget(QWidget):
             if not self.wifi_networks:
                 return
 
+            self.wifi_session += 1
             network = self.wifi_networks[self.wifi_selected_index]
             if network.get("saved"):
                 self.wifi_stage = "saved"
@@ -2630,6 +2656,7 @@ class ConfigWidget(QWidget):
                     list(network.get("profile_uuids", []))
                 )
             else:
+                self.wifi_session += 1
                 self.wifi_stage = "networks"
             return
 
@@ -2637,6 +2664,7 @@ class ConfigWidget(QWidget):
         if key == "DEL":
             self.wifi_password = self.wifi_password[:-1]
         elif key == "CANCEL":
+            self.wifi_session += 1
             self.wifi_stage = "networks"
             self.wifi_password = ""
         elif key == "PREV":

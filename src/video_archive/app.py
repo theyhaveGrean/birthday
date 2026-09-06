@@ -105,6 +105,40 @@ def _normalize_wifi_security(value):
     return value
 
 
+def _load_wifi_profiles():
+    """Read SSIDs from individual profiles; list output has no SSID field."""
+    result = subprocess.run(
+        ["nmcli", "-t", "-f", "UUID,TYPE,NAME", "connection", "show"],
+        check=False, capture_output=True, text=True, timeout=5,
+    )
+    profiles = []
+    if result.returncode != 0:
+        return profiles
+    for line in result.stdout.splitlines():
+        fields = _split_nmcli_terse(line)
+        if len(fields) < 3:
+            continue
+        uuid, profile_type, name = fields[:3]
+        if not uuid or profile_type not in {"802-11-wireless", "wifi"}:
+            continue
+        try:
+            details = subprocess.run(
+                ["nmcli", "-t", "-f", "802-11-wireless.ssid",
+                 "connection", "show", "uuid", uuid],
+                check=False, capture_output=True, text=True, timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if details.returncode != 0:
+            continue
+        for detail in details.stdout.splitlines():
+            values = _split_nmcli_terse(detail)
+            if len(values) == 2 and values[0] == "802-11-wireless.ssid" and values[1]:
+                profiles.append({"uuid": uuid, "name": name, "ssid": values[1]})
+                break
+    return profiles
+
+
 def _friendly_nmcli_error(output, default):
     text = (output or "").strip()
     lower = text.lower()
@@ -737,13 +771,13 @@ class VideoArchiveWindow(QMainWindow):
         self.pending_index = None
 
         self.mpv_ready = False
-        self.mpv_started = False
         self.transition_minimum_elapsed = False
         self.return_pending = False
         self.return_target = "gallery"
         self.playback_generation = 0
         self.wifi_scan_running = False
         self.wifi_connect_running = False
+        self.wifi_connect_context = None
         self.wifi_status_running = False
         self.wifi_status_refresh_pending = False
         self.wifi_disconnect_running = False
@@ -1010,10 +1044,6 @@ class VideoArchiveWindow(QMainWindow):
 
         self.player.ready.connect(
             self._mpv_ready
-        )
-
-        self.player.started.connect(
-            self._mpv_started
         )
 
         self.player.ended.connect(
@@ -1374,7 +1404,6 @@ class VideoArchiveWindow(QMainWindow):
         self.playback_generation += 1
 
         self.mpv_ready = False
-        self.mpv_started = False
         self.transition_minimum_elapsed = False
         self.return_pending = False
 
@@ -1594,7 +1623,12 @@ class VideoArchiveWindow(QMainWindow):
         thread.start()
 
     def _cloud_message_worker(self, url):
-        message, error = fetch_cloud_message(url)
+        try:
+            message, error = fetch_cloud_message(url)
+        except Exception as exc:
+            # Always release the running flag through the GUI completion slot,
+            # even for an unexpected network/parser/cache failure.
+            message, error = None, str(exc) or type(exc).__name__
         self.cloud_message_finished.emit(message or "", error or "")
 
     def _cloud_message_finished(self, message, error):
@@ -1731,37 +1765,10 @@ class VideoArchiveWindow(QMainWindow):
 
         saved_profiles = {}
         try:
-            profiles = subprocess.run(
-                [
-                    "nmcli",
-                    "-t",
-                    "-f",
-                    "UUID,TYPE,NAME,802-11-wireless.ssid",
-                    "connection",
-                    "show",
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
+            for profile in _load_wifi_profiles():
+                saved_profiles.setdefault(profile["ssid"], []).append(profile)
         except (OSError, subprocess.TimeoutExpired):
-            profiles = None
-
-        if profiles and profiles.returncode == 0:
-            for line in profiles.stdout.splitlines():
-                parts = _split_nmcli_terse(line)
-                if len(parts) < 4:
-                    continue
-                uuid, profile_type, name, profile_ssid = parts[:4]
-                if (
-                    profile_type in {"802-11-wireless", "wifi"}
-                    and uuid
-                    and profile_ssid
-                ):
-                    saved_profiles.setdefault(profile_ssid, []).append(
-                        {"uuid": uuid, "name": name}
-                    )
+            pass
 
         networks = []
         seen = set()
@@ -1907,6 +1914,7 @@ class VideoArchiveWindow(QMainWindow):
             return
 
         self.wifi_connect_running = True
+        self.wifi_connect_context = self.config_page.wifi_session
         thread = threading.Thread(
             target=self._connect_wifi_worker,
             args=(ssid, password),
@@ -1948,50 +1956,19 @@ class VideoArchiveWindow(QMainWindow):
         # letting `nmcli device wifi connect` recreate the profile from the AP.
         if result.returncode != 0 and "key-mgmt: property is missing" in output.lower():
             try:
-                profiles = subprocess.run(
-                    [
-                        "nmcli",
-                        "-t",
-                        "-f",
-                        "UUID,TYPE,802-11-wireless.ssid",
-                        "connection",
-                        "show",
-                    ],
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                if profiles.returncode == 0:
-                    for line in profiles.stdout.splitlines():
-                        parts = _split_nmcli_terse(line)
-                        if len(parts) < 3:
-                            continue
-                        uuid, profile_type, profile_ssid = parts[:3]
-                        if profile_ssid == ssid and profile_type in {
-                            "802-11-wireless",
-                            "wifi",
-                        }:
-                            subprocess.run(
-                                ["nmcli", "connection", "delete", "uuid", uuid],
-                                check=False,
-                                capture_output=True,
-                                text=True,
-                                timeout=5,
-                            )
+                for profile in _load_wifi_profiles():
+                    if profile["ssid"] == ssid:
+                        subprocess.run(
+                            ["nmcli", "connection", "delete", "uuid", profile["uuid"]],
+                            check=False, capture_output=True, text=True, timeout=5,
+                        )
 
-                    # Make sure the AP is freshly visible before recreating it.
-                    subprocess.run(
-                        ["nmcli", "device", "wifi", "rescan"],
-                        check=False,
-                        capture_output=True,
-                        text=True,
-                        timeout=8,
-                    )
-                    result = run_connect()
-                    output = (
-                        (result.stderr or "") + "\n" + (result.stdout or "")
-                    ).strip()
+                subprocess.run(
+                    ["nmcli", "device", "wifi", "rescan"],
+                    check=False, capture_output=True, text=True, timeout=8,
+                )
+                result = run_connect()
+                output = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()
             except (OSError, subprocess.TimeoutExpired):
                 # Fall through and display the original/last NetworkManager
                 # error instead of crashing the UI.
@@ -2007,9 +1984,16 @@ class VideoArchiveWindow(QMainWindow):
 
     def _wifi_connect_finished(self, connected, status):
         self.wifi_connect_running = False
-        self.config_page.set_wifi_status(status)
-        if connected:
-            self.config_page.wifi_connection_succeeded()
+        current_session = (
+            self.mode == "config"
+            and self.config_page.showing_wifi
+            and self.wifi_connect_context == self.config_page.wifi_session
+        )
+        self.wifi_connect_context = None
+        if current_session:
+            self.config_page.set_wifi_status(status)
+            if connected:
+                self.config_page.wifi_connection_succeeded()
         self._refresh_wifi_status()
         if connected and self.settings.get("cloud_message_url"):
             QTimer.singleShot(500, self._refresh_cloud_message)
@@ -2029,6 +2013,7 @@ class VideoArchiveWindow(QMainWindow):
             return
 
         self.wifi_connect_running = True
+        self.wifi_connect_context = self.config_page.wifi_session
         threading.Thread(
             target=self._connect_saved_wifi_worker,
             args=(uuids,),
@@ -2400,94 +2385,33 @@ class VideoArchiveWindow(QMainWindow):
         if generation != self.playback_generation or self.mode != "loading":
             return
         print(
-            "mpv: file-loaded",
+            "mpv: first paused frame ready",
             flush=True,
         )
 
         self.mpv_ready = True
         self._maybe_start_video()
 
-    def _mpv_started(self, generation):
-        if generation != self.playback_generation or self.mode != "loading":
-            return
-        print(
-            "mpv: playback position advancing",
-            flush=True,
-        )
-
-        if self.mpv_started:
-            return
-
-        self.mpv_started = True
-        # Keep the opaque transition up for a few render cycles after
-        # playback position advances so the handoff cannot expose a late
-        # black clear frame from the native mpv surface.
-        generation = self.playback_generation
-        QTimer.singleShot(
-            700,
-            lambda g=generation: self._maybe_reveal_video(g),
-        )
-
     def _transition_minimum_elapsed(self):
         self.transition_minimum_elapsed = True
         self._maybe_start_video()
 
     def _maybe_start_video(self):
-        """
-        Start mpv only once BOTH:
-          1) mpv has finished loading the file, and
-          2) the visible transition has run for its minimum duration.
+        self._maybe_reveal_video(self.playback_generation)
 
-        The native video surface is already mapped underneath the native
-        opaque transition, so mpv can render without exposing its clear frame.
-        """
-        if self.mode != "loading":
+    def _maybe_reveal_video(self, generation):
+        """Reveal the initialized, paused first frame before starting playback."""
+        if generation != self.playback_generation or self.mode != "loading":
             return
-
-        if not (
-            self.mpv_ready
-            and self.transition_minimum_elapsed
-        ):
+        if not (self.mpv_ready and self.transition_minimum_elapsed):
             return
-
-        if self.mpv_started:
-            return
-
-        print(
-            "mpv loaded + transition minimum complete -> unpause behind transition",
-            flush=True,
-        )
-
-        self.playback_page.transition.raise_()
-
-        QApplication.processEvents()
-
-        self.player.play()
-
-    def _maybe_reveal_video(self, generation=None):
-        """
-        Hide the transition only after mpv reports playback-restart,
-        meaning playback has actually resumed and the video renderer has
-        a real frame ready underneath us.
-        """
-        if generation is not None and generation != self.playback_generation:
-            return
-        if self.mode != "loading":
-            return
-
-        if not self.mpv_started:
-            return
-
-        print(
-            "first playback frames active -> reveal video + audio",
-            flush=True,
-        )
 
         self.playback_watchdog.stop()
         self.playback_page.hide_transition()
-        self.player.unmute()
-
         self.mode = "playing"
+        # Unmute while still paused so the first audio sample is preserved.
+        self.player.unmute()
+        self.player.play()
 
     def _playback_start_timeout(self):
         if self.mode == "loading":
@@ -2507,7 +2431,7 @@ class VideoArchiveWindow(QMainWindow):
     def _video_ended(self, generation):
         if generation != self.playback_generation:
             return
-        if self.mode == "playing":
+        if self.mode in ("loading", "playing"):
             self._begin_return()
 
     def _begin_return(self, target="gallery"):

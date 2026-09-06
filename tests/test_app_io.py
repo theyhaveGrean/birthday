@@ -306,12 +306,16 @@ def test_cloud_message_finished_updates_memos_without_name_error(monkeypatch):
     calls = []
 
     class FakeDisplay:
+        sleeping = False
         def wake(self):
             calls.append("wake")
 
     class FakeCounter:
         def set_unread_memo_count(self, count):
             calls.append(("unread", count))
+
+        def set_cloud_status(self, status):
+            calls.append(("cloud", status))
 
     class FakeConfig:
         showing_admin = False
@@ -335,6 +339,7 @@ def test_cloud_message_finished_updates_memos_without_name_error(monkeypatch):
 
     class FakeWindow:
         _wake_display_for_memo = app.VideoArchiveWindow._wake_display_for_memo
+        _restart_display_sleep_timer = lambda self: calls.append("restart_sleep")
         _play_memo_chime = lambda self: calls.append("chime")
         _restart_memo_chime_interval = lambda self: calls.append("restart_chime")
         _update_memo_chime_timer = lambda self: calls.append("update_chime")
@@ -346,6 +351,7 @@ def test_cloud_message_finished_updates_memos_without_name_error(monkeypatch):
             self.settings = {"wake_on_memo": True, "memo_chime_enabled": False}
             self.gallery = FakeCounter()
             self.home = FakeCounter()
+            self.ambient_sleep = FakeCounter()
             self.config_page = FakeConfig()
             self.display = FakeDisplay()
             self.cloud_message_timer = FakeTimer()

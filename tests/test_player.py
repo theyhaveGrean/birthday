@@ -28,7 +28,12 @@ def test_mpv_uses_alsa_default_audio_device(monkeypatch, tmp_path):
 
     controller = MpvController()
     controller.log_path = tmp_path / "mpv.log"
-    controller.preload(video, wid=123, volume=80, event_generation=1)
+    controller.preload(video, wid=123, volume=150, event_generation=1)
 
     assert "--ao=alsa" in commands[0]
     assert "--audio-device=alsa/default" in commands[0]
+
+    assert "--volume=150" in commands[0]
+    assert "--volume-max=150" in commands[0]
+    assert "--pause=yes" in commands[0]
+    assert "--idle=yes" in commands[0]

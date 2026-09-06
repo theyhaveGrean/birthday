@@ -15,22 +15,22 @@ class FakeButton:
 
 
 def test_gpio_callbacks_queue_qt_signals(monkeypatch, qapp):
-    from PySide6.QtTest import QSignalSpy
+    from PySide6.QtCore import QCoreApplication
 
     import video_archive.input as input_module
 
     monkeypatch.setattr(input_module, "Button", FakeButton)
     controller = input_module.InputController()
-    left_spy = QSignalSpy(controller.left_pressed)
-    select_spy = QSignalSpy(controller.select_pressed)
+    received = []
+    controller.left_pressed.connect(lambda: received.append("left"))
+    controller.select_pressed.connect(lambda: received.append("select"))
 
     controller._left_pressed()
     controller._select_released()
 
-    assert left_spy.count() == 0
-    assert select_spy.count() == 0
-    assert left_spy.wait(100)
-    assert select_spy.wait(100)
+    assert received == []
+    QCoreApplication.sendPostedEvents(controller, input_module.INPUT_SIGNAL_EVENT)
+    assert received == ["left", "select"]
 
 
 def test_gpio_callbacks_are_prioritized_over_normal_events(monkeypatch, qapp):

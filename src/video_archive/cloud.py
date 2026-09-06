@@ -3,6 +3,7 @@ import json
 import threading
 import uuid
 from datetime import datetime, timezone
+from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
@@ -239,6 +240,7 @@ def _supabase_notes_url(url=None):
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     query["select"] = SUPABASE_NOTES_SELECT
     query["order"] = "created_at.desc"
+    query["limit"] = str(MAX_MEMOS)
     return urlunsplit((
         parts.scheme,
         parts.netloc,
@@ -309,7 +311,7 @@ def _sync_supabase_notes(rows):
 def _http_error_body(error):
     try:
         body = error.read(MAX_RESPONSE_BYTES).decode("utf-8", errors="replace").strip()
-    except OSError:
+    except (OSError, HTTPException):
         body = ""
     return f"HTTP {error.code}: {body}" if body else f"HTTP {error.code}"
 
@@ -327,10 +329,12 @@ def fetch_cloud_message(url=None):
             headers=headers,
         )
         with urlopen(request, timeout=FETCH_TIMEOUT_SECONDS) as response:
-            raw = response.read(MAX_RESPONSE_BYTES)
+            # Bound the number of rows at the server, then read complete JSON.
+            # A byte cutoff can split a row, especially for Unicode messages.
+            raw = response.read()
     except HTTPError as error:
         return None, _http_error_body(error)
-    except (OSError, URLError, ValueError) as error:
+    except (OSError, URLError, ValueError, HTTPException) as error:
         return None, str(error)
 
     try:

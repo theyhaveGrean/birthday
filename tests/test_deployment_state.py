@@ -28,7 +28,7 @@ def test_mpv_spawn_failure_closes_log():
 def test_playback_reveal_is_generation_guarded():
     assert "self.playback_generation += 1" in APP_SOURCE
     assert "generation != self.playback_generation" in APP_SOURCE
-    assert "lambda g=generation: self._maybe_reveal_video(g)" in APP_SOURCE
+    assert "self._maybe_reveal_video(self.playback_generation)" in APP_SOURCE
 
 
 def test_cloud_errors_are_rate_limited():
@@ -39,7 +39,6 @@ def test_cloud_errors_are_rate_limited():
 
 def test_player_events_are_generation_tagged_at_app_boundary():
     assert "ready = Signal(int)" in PLAYER_SOURCE
-    assert "started = Signal(int)" in PLAYER_SOURCE
     assert "ended = Signal(int)" in PLAYER_SOURCE
     assert "failed = Signal(int, str)" in PLAYER_SOURCE
     assert 'generation != self.playback_generation' in APP_SOURCE
@@ -87,9 +86,18 @@ def test_wifi_status_poll_does_not_scan_all_access_points():
     assert '"wifi", "list"' not in worker
 
 
-def test_global_home_is_shown_before_blocking_player_stop():
-    block = APP_SOURCE.split("def go_home(self):", 1)[1].split("def play_selected", 1)[0]
-    assert block.index("self.pages.setCurrentWidget(self.home)") < block.index("self.player.stop(silent=True)")
+def test_global_home_changes_pending_return_destination():
+    from types import SimpleNamespace
+    from video_archive.app import VideoArchiveWindow
+
+    window = SimpleNamespace(
+        mode="returning", return_pending=True, return_target="gallery",
+        gallery=SimpleNamespace(cancel_navigation=lambda: None),
+        config_page=SimpleNamespace(flicker_timer=SimpleNamespace(stop=lambda: None)),
+        about_refresh_timer=SimpleNamespace(stop=lambda: None),
+    )
+    VideoArchiveWindow.go_home(window)
+    assert window.return_target == "home"
 
 
 def test_device_uptime_prefers_proc_uptime():

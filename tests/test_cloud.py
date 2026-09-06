@@ -171,7 +171,7 @@ def test_supabase_notes_are_synced_to_local_memos(monkeypatch, tmp_path):
     assert message == "newest"
     assert captured["url"] == (
         "https://rrwyqfddvijgimcslqkl.supabase.co/rest/v1/notes?"
-        "select=id%2Cname%2Cmessage%2Ccreated_at&order=created_at.desc"
+        "select=id%2Cname%2Cmessage%2Ccreated_at&order=created_at.desc&limit=100"
     )
     assert captured["headers"]["Apikey"] == cloud.SUPABASE_PUBLISHABLE_KEY
     assert captured["headers"]["Authorization"] == (

@@ -14,7 +14,6 @@ from .storage import clamp_int
 
 class MpvController(QObject):
     ready = Signal(int)
-    started = Signal(int)
     ended = Signal(int)
     failed = Signal(int, str)
 
@@ -30,7 +29,6 @@ class MpvController(QObject):
         self._reader_thread = None
         self._generation = 0
         self._stopping = False
-        self._started_sent = False
         self._log_file = None
 
     def preload(self, path, wid, volume=100, event_generation=0):
@@ -48,14 +46,13 @@ class MpvController(QObject):
             pass
 
         self._stopping = False
-        self._started_sent = False
 
         # Keep this command intentionally minimal while debugging X11
         # embedding. These options are enough for:
         #  - embedding into the Qt native child window
         #  - loading paused behind the transition
         #  - IPC control
-        volume = clamp_int(volume, 0, 100)
+        volume = clamp_int(volume, 0, 150)
 
         args = [
             "mpv",
@@ -70,10 +67,10 @@ class MpvController(QObject):
             "--audio-device=alsa/default",
             f"--input-ipc-server={self.socket_path}",
             "--force-window=yes",
-            "--volume-max=100",
+            "--volume-max=150",
             f"--volume={volume}",
             "--af=lavfi=[highpass=f=180,dynaudnorm=f=250:g=15:p=0.95:m=20]",
-            str(path),
+            "--idle=yes",
         ]
 
         try:
@@ -112,7 +109,7 @@ class MpvController(QObject):
         socket_path = self.socket_path
         self._reader_thread = threading.Thread(
             target=self._ipc_reader,
-            args=(generation, int(event_generation), process, socket_path),
+            args=(generation, int(event_generation), process, socket_path, path),
             daemon=True,
         )
         self._reader_thread.start()
@@ -128,10 +125,10 @@ class MpvController(QObject):
         )
 
     def set_volume(self, volume):
-        volume = clamp_int(volume, 0, 100)
+        volume = clamp_int(volume, 0, 150)
 
         self.command(
-            ["set_property", "volume-max", 100]
+            ["set_property", "volume-max", 150]
         )
         self.command(
             ["set_property", "volume", volume]
@@ -245,7 +242,7 @@ class MpvController(QObject):
 
         self.failed.emit(int(event_generation), message)
 
-    def _ipc_reader(self, generation, event_generation, process, socket_path):
+    def _ipc_reader(self, generation, event_generation, process, socket_path, path):
         deadline = (
             time.monotonic() + 8.0
         )
@@ -288,6 +285,7 @@ class MpvController(QObject):
             )
 
         except OSError as exc:
+            sock.close()
             if not self._stopping and generation == self._generation:
                 self._fail_with_log(
                     event_generation, f"mpv IPC connection failed: {exc}"
@@ -302,120 +300,73 @@ class MpvController(QObject):
             return
 
         self._sock = sock
-
-        # Ask mpv to report both EOF and playback position. playback-restart
-        # fires too early for the UI handoff; time-pos advancing confirms
-        # playback is actually moving while still muted behind the transition.
-        try:
-            for command in (
-                [
-                    "observe_property",
-                    1,
-                    "eof-reached",
-                ],
-                [
-                    "observe_property",
-                    2,
-                    "time-pos",
-                ],
-            ):
-                sock.sendall(
-                    (
-                        json.dumps(
-                            {
-                                "command": command,
-                            }
-                        )
-                        + "\n"
-                    ).encode("utf-8")
-                )
-        except OSError:
-            pass
-
+        ready_sent = False
+        terminal_event_sent = False
+        failure = "mpv IPC connection closed unexpectedly"
         buffer = b""
 
         try:
+            # Subscribe before loading so even a tiny file cannot finish loading
+            # before the IPC connection is listening. Keep its first frame paused.
+            for command in (
+                ["observe_property", 1, "eof-reached"],
+                ["loadfile", str(path), "replace"],
+            ):
+                sock.sendall((json.dumps({"command": command}) + "\n").encode("utf-8"))
+
             while generation == self._generation:
                 chunk = sock.recv(4096)
-
                 if not chunk:
                     break
-
                 buffer += chunk
-
                 while b"\n" in buffer:
-                    raw, buffer = (
-                        buffer.split(b"\n", 1)
-                    )
-
+                    raw, buffer = buffer.split(b"\n", 1)
                     if not raw.strip():
                         continue
-
                     try:
-                        message = json.loads(
-                            raw.decode("utf-8")
-                        )
+                        message = json.loads(raw.decode("utf-8"))
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         continue
+                    if not isinstance(message, dict):
+                        continue
+                    if self._stopping or generation != self._generation:
+                        return
 
-                    event = message.get(
-                        "event"
-                    )
-
-                    if event == "file-loaded" and generation == self._generation:
+                    event = message.get("event")
+                    # mpv emits playback-restart once its initial paused frame
+                    # has been initialized; no media time needs to elapse.
+                    if event == "playback-restart" and not ready_sent:
+                        ready_sent = True
                         self.ready.emit(event_generation)
-
-                    elif event == "playback-restart":
-                        pass
-
-                    elif event == "property-change":
-                        if (
-                            message.get("name") == "eof-reached"
-                            and message.get("data") is True
-                            and not self._stopping
-                            and generation == self._generation
-                        ):
+                    elif (
+                        (event == "property-change"
+                         and message.get("name") == "eof-reached"
+                         and message.get("data") is True)
+                        or (event == "end-file" and message.get("reason") == "eof")
+                    ):
+                        if not terminal_event_sent:
+                            terminal_event_sent = True
                             self.ended.emit(event_generation)
-                        elif (
-                            message.get("name") == "time-pos"
-                            and not self._started_sent
-                            and not self._stopping
-                            and generation == self._generation
-                        ):
-                            position = message.get(
-                                "data"
-                            )
-
-                            if (
-                                isinstance(position, (int, float))
-                                and position >= 0.15
-                            ):
-                                self._started_sent = True
-                                self.started.emit(event_generation)
-
-                    elif event == "end-file":
-                        # Fallback for mpv versions/configurations that
-                        # still emit end-file normally with keep-open.
-                        reason = message.get(
-                            "reason",
-                            "",
+                    elif event == "end-file" and message.get("reason") == "error":
+                        terminal_event_sent = True
+                        self._fail_with_log(
+                            event_generation,
+                            f"mpv playback failed: {message.get('file_error', 'decoder error')}",
                         )
-
-                        if (
-                            reason == "eof"
-                            and not self._stopping
-                            and generation == self._generation
-                        ):
-                            self.ended.emit(event_generation)
-
-        except OSError:
-            pass
-
+                        return
+        except OSError as exc:
+            failure = f"mpv IPC failed: {exc}"
         finally:
             try:
                 sock.close()
             except OSError:
                 pass
-
             if self._sock is sock:
                 self._sock = None
+
+        if (
+            not terminal_event_sent
+            and not self._stopping
+            and generation == self._generation
+        ):
+            self._fail_with_log(event_generation, failure)
