@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+
+from tools.rotate_normalized_video import parse_args, rotate_normalized_video
+
+if __name__ == "__main__":
+    raise SystemExit(rotate_normalized_video(parse_args()))

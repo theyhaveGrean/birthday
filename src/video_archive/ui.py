@@ -829,6 +829,11 @@ class GalleryWidget(QWidget):
             self.selected_index + offset
         ) % len(self.titles)
 
+    @staticmethod
+    def visible_start_for_index(index, title_count, visible_rows):
+        half = visible_rows // 2
+        return max(0, min(index - half, title_count - visible_rows))
+
     # =====================================================
     # NAVIGATION
     # =====================================================
@@ -1018,23 +1023,68 @@ class GalleryWidget(QWidget):
         row_step = row_height + row_gap
         available_h = max(row_height, content_bottom - content_top)
         visible_rows = min(len(self.titles), max(1, available_h // row_step))
-        half = visible_rows // 2
-        start = max(0, min(self.selected_index - half, len(self.titles) - visible_rows))
+        start = self.visible_start_for_index(
+            self.selected_index,
+            len(self.titles),
+            visible_rows,
+        )
 
         animation_px = 0
+        fraction = 0
+        target_index = self.selected_index
+        target_start = start
         if self.animating:
             fraction = self.animation_step / ANIMATION_STEPS
-            animation_px = int(-self.animation_direction * row_step * fraction)
+            target_index = (
+                self.selected_index
+                + self.animation_direction
+            ) % len(self.titles)
+            target_start = self.visible_start_for_index(
+                target_index,
+                len(self.titles),
+                visible_rows,
+            )
+            if abs(target_index - self.selected_index) != 1:
+                target_start = start
+            animation_px = int((start - target_start) * row_step * fraction)
+
+        highlight_y = None
+        if not self.animating:
+            highlight_y = content_top + (self.selected_index - start) * row_step
+        else:
+            current_y = content_top + (self.selected_index - start) * row_step
+            if start != target_start:
+                next_y = current_y
+            elif abs(target_index - self.selected_index) == 1:
+                next_y = content_top + (target_index - start) * row_step
+            else:
+                next_y = current_y + self.animation_direction * row_step
+            highlight_y = int(current_y + (next_y - current_y) * fraction)
 
         painter.save()
         painter.setClipRect(QRect(list_left, content_top, list_width, available_h))
         painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
-        for index in range(start, min(len(self.titles), start + visible_rows + 1)):
+        paint_start = min(start, target_start)
+        paint_end = min(len(self.titles), max(start, target_start) + visible_rows + 1)
+        if highlight_y is not None:
+            painter.fillRect(
+                list_left,
+                highlight_y + 6,
+                6,
+                row_height - 12,
+                GREEN_BRIGHT,
+            )
+        for index in range(paint_start, paint_end):
             y = content_top + (index - start) * row_step + animation_px
             row = QRect(list_left, y, list_width, row_height)
-            selected = index == self.selected_index and not self.animating
+            selected = (
+                index == self.selected_index
+                and not self.animating
+            ) or (
+                self.animating
+                and index == target_index
+            )
             if selected:
-                painter.fillRect(row.left(), row.top() + 6, 6, row.height() - 12, GREEN_BRIGHT)
                 painter.setPen(GREEN_BRIGHT)
             else:
                 painter.setPen(TEXT_MAIN)
