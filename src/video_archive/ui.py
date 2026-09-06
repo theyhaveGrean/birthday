@@ -48,6 +48,41 @@ DEFAULT_CLOCK_TIMEZONE = "America/Los_Angeles"
 
 GALLERY_CENTER_Y = 390
 
+# The application is rendered for a fixed 800x480 display.  Keep all pages on
+# the same visual grid so navigation does not make the left pane or type jump.
+FRAME_INSET = 60
+FRAME_HEADER_Y = 105
+FRAME_FOOTER_Y = -75
+CONTENT_TOP = 160
+CONTENT_BOTTOM_INSET = 105
+MENU_LEFT = 118
+MENU_WIDTH = 274
+DIVIDER_X = 410
+DETAIL_LEFT = 455
+DETAIL_RIGHT_INSET = 60
+
+FONT_FAMILY = "DejaVu Sans Mono"
+FONT_WEIGHT = QFont.Bold
+
+
+def ui_font(size):
+    """Return the application font, keeping family and weight consistent."""
+    return QFont(FONT_FAMILY, size, FONT_WEIGHT)
+
+
+def content_bottom(widget):
+    return widget.height() - CONTENT_BOTTOM_INSET
+
+
+def detail_rect(widget, top=CONTENT_TOP, bottom=None):
+    bottom = content_bottom(widget) if bottom is None else bottom
+    return QRect(
+        DETAIL_LEFT,
+        top,
+        max(1, widget.width() - DETAIL_LEFT - DETAIL_RIGHT_INSET),
+        max(1, bottom - top),
+    )
+
 SLOT_WIDTH = 300
 SLOT_HEIGHT = 100
 
@@ -386,28 +421,28 @@ class StartScreenWidget(QWidget):
         )
 
         painter.setPen(GREEN_DIM)
-        painter.drawLine(60, 105, self.width() - 60, 105)
+        painter.drawLine(FRAME_INSET, FRAME_HEADER_Y, self.width() - FRAME_INSET, FRAME_HEADER_Y)
         painter.drawLine(
-            60,
-            self.height() - 75,
-            self.width() - 60,
-            self.height() - 75,
+            FRAME_INSET,
+            self.height() + FRAME_FOOTER_Y,
+            self.width() - FRAME_INSET,
+            self.height() + FRAME_FOOTER_Y,
         )
 
         pulse_on = self.flicker_phase % 18 < 12
-        menu_left = 118
-        content_top = 160
+        menu_left = MENU_LEFT
+        content_top = CONTENT_TOP
         content_bottom = self.height() - 105
-        detail = QRect(455, content_top, self.width() - 565, content_bottom - content_top)
+        detail = detail_rect(self, content_top, content_bottom)
         painter.setPen(GREEN_DIM)
-        painter.drawLine(410, content_top, 410, content_bottom)
+        painter.drawLine(DIVIDER_X, content_top, DIVIDER_X, content_bottom)
 
         if self.boot_complete:
             painter.fillRect(menu_left, content_top + 6, 6, 48, GREEN_BRIGHT)
             painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
             painter.setPen(GREEN_BRIGHT if pulse_on else GREEN_MAIN)
             painter.drawText(
-                QRect(menu_left + 24, content_top, 260, 60),
+                QRect(menu_left + 24, content_top, MENU_WIDTH - 24, 60),
                 Qt.AlignLeft | Qt.AlignVCenter,
                 "START",
             )
@@ -434,7 +469,7 @@ class StartScreenWidget(QWidget):
                 color = TEXT_MAIN if index == visible_boot_lines - 1 else TEXT_DIM
                 painter.setPen(color)
                 painter.drawText(
-                    QRect(menu_left + 24, content_top + index * 32, 270, 26),
+                    QRect(menu_left + 24, content_top + index * 32, MENU_WIDTH - 24, 26),
                     Qt.AlignLeft | Qt.AlignVCenter,
                     line,
                 )
@@ -596,14 +631,14 @@ class HomeWidget(QWidget):
             self.height() - 75,
         )
 
-        menu_left = 118
-        menu_top = 165
+        menu_left = MENU_LEFT
+        menu_top = CONTENT_TOP
         row_height = 60
         row_gap = 10
         row_step = row_height + row_gap
         detail_top = menu_top
         content_bottom = self.height() - 105
-        detail = QRect(455, detail_top, self.width() - 565, content_bottom - detail_top)
+        detail = detail_rect(self, detail_top, content_bottom)
 
         memo_value = ""
         if self.unread_memo_count:
@@ -613,13 +648,13 @@ class HomeWidget(QWidget):
             rect = QRect(
                 menu_left,
                 menu_top + index * row_step,
-                300,
+                MENU_WIDTH,
                 row_height,
             )
             self._draw_home_option(painter, index, rect, label, values[index])
 
         painter.setPen(GREEN_DIM)
-        painter.drawLine(410, detail_top, 410, content_bottom)
+        painter.drawLine(DIVIDER_X, detail_top, DIVIDER_X, content_bottom)
 
         detail_titles = ("VIDEO ARCHIVE", "PRIVATE MEMOS", "DEVICE SETTINGS")
         detail_texts = [
@@ -994,7 +1029,7 @@ class GalleryWidget(QWidget):
 
         content_top = 150
         if self.unread_memo_count:
-            alert = QRect(118, 122, self.width() - 236, 34)
+            alert = QRect(MENU_LEFT, 122, self.width() - MENU_LEFT * 2, 34)
             painter.fillRect(alert, RED_BG)
             painter.setPen(QPen(RED_BRIGHT, 2))
             painter.drawRect(alert)
@@ -1013,10 +1048,9 @@ class GalleryWidget(QWidget):
             painter.drawText(QRect(60, self.height() - 67, self.width() - 120, 26), Qt.AlignLeft | Qt.AlignBottom, "HOLD SELECT: HOME")
             return
 
-        list_left = 118
-        list_width = 410
-        divider_x = 548
-        detail_left = 585
+        list_left = MENU_LEFT
+        list_width = MENU_WIDTH
+        divider_x = DIVIDER_X
         content_bottom = self.height() - 105
         row_height = 56
         row_gap = 8
@@ -1107,7 +1141,7 @@ class GalleryWidget(QWidget):
             painter.fillRect(track, GREEN_DIM)
             painter.fillRect(QRect(track.left(), thumb_top, track.width(), thumb_h), GREEN_MAIN)
 
-        detail = QRect(detail_left, content_top, self.width() - detail_left - 60, content_bottom - content_top)
+        detail = detail_rect(self, content_top, content_bottom)
         painter.setFont(QFont("DejaVu Sans Mono", 22, QFont.Bold))
         painter.setPen(GREEN_BRIGHT)
         painter.drawText(detail, Qt.AlignLeft | Qt.AlignTop, "ARCHIVE ENTRY")
@@ -1168,7 +1202,7 @@ class TextPanelPage:
         return wrapped or [""]
 
     def draw(self, painter, width, height):
-        panel = QRect(88, 145, width - 176, height - 265)
+        panel = QRect(FRAME_INSET, CONTENT_TOP - 15, width - FRAME_INSET * 2, height - 265)
         text_rect = panel.adjusted(30, 86, -52, -58)
 
         painter.fillRect(panel, QColor("#071007"))
@@ -1236,21 +1270,21 @@ class SettingsRenderer:
 
     def draw(self, painter, widget):
         menu = widget._settings_menu()
-        menu_left = 118
-        menu_top = 160
+        menu_left = MENU_LEFT
+        menu_top = CONTENT_TOP
         footer_rule_y = widget.height() - 75
         content_bottom = footer_rule_y - 18
         row_gap = 10
         row_height = max(40, min(60, (content_bottom - menu_top - row_gap * (len(menu) - 1)) // len(menu)))
         row_step = row_height + row_gap
         detail_top = menu_top
-        detail = QRect(455, detail_top, widget.width() - 565, max(120, content_bottom - detail_top))
+        detail = detail_rect(widget, detail_top, content_bottom)
 
         for index, label in enumerate(menu):
-            widget._draw_option(painter, index, QRect(menu_left, menu_top + index * row_step, 300, row_height), label, "")
+            widget._draw_option(painter, index, QRect(menu_left, menu_top + index * row_step, MENU_WIDTH, row_height), label, "")
 
         painter.setPen(GREEN_DIM)
-        painter.drawLine(410, detail_top, 410, content_bottom)
+        painter.drawLine(DIVIDER_X, detail_top, DIVIDER_X, content_bottom)
         painter.setFont(QFont("DejaVu Sans Mono", 18, QFont.Bold))
         painter.setPen(GREEN_BRIGHT)
 
@@ -1406,15 +1440,15 @@ class MemoRenderer:
         if selected_unread and not host.memo_reading:
             memo = "NEW MEMO // UNREAD\n\nSELECT TO OPEN"
         left = QRect(
-            118,
-            160,
-            290,
+            MENU_LEFT,
+            CONTENT_TOP,
+            MENU_WIDTH,
             host.height() - 253,
         )
         right = QRect(
             455,
             left.top(),
-            host.width() - 565,
+            host.width() - DETAIL_LEFT - DETAIL_RIGHT_INSET,
             left.height(),
         )
 
@@ -1431,7 +1465,7 @@ class MemoRenderer:
         )
 
         painter.setPen(GREEN_DIM)
-        painter.drawLine(410, left.top(), 410, left.bottom())
+        painter.drawLine(DIVIDER_X, left.top(), DIVIDER_X, left.bottom())
 
         memo_rows = list(memos)
         row_height = 54
@@ -1638,7 +1672,7 @@ class MemoRenderer:
 class WifiRenderer:
     """Rendering for the Wifi screen."""
     def draw(self, painter, host):
-        panel = QRect(70, 120, host.width() - 140, host.height() - 205)
+        panel = QRect(FRAME_INSET, CONTENT_TOP - 40, host.width() - FRAME_INSET * 2, host.height() - 205)
         painter.fillRect(panel, QColor("#071007"))
         pen = QPen(GREEN_BRIGHT)
         pen.setWidth(3)
@@ -1846,16 +1880,16 @@ class WifiRenderer:
 class AdminRenderer:
     """Rendering for the Admin screen."""
     def draw(self, painter, host):
-        menu_left = 100
-        menu_top = 166
+        menu_left = MENU_LEFT
+        menu_top = CONTENT_TOP
         row_height = 58
         row_step = 72
-        detail = QRect(450, 158, host.width() - 555, 360)
+        detail = detail_rect(host)
         actions = ADMIN_ACTIONS
 
         for index, label in enumerate(actions):
             action_rect = QRect(
-                menu_left, menu_top + index * row_step, 300, row_height
+                menu_left, menu_top + index * row_step, MENU_WIDTH, row_height
             )
             host._draw_option(
                 painter,
@@ -1882,7 +1916,7 @@ class AdminRenderer:
                 )
 
         painter.setPen(GREEN_DIM)
-        painter.drawLine(420, 158, 420, 518)
+        painter.drawLine(DIVIDER_X, CONTENT_TOP, DIVIDER_X, content_bottom(host))
         painter.setFont(QFont("DejaVu Sans Mono", 18, QFont.Bold))
         destructive_admin = host.admin_index in (1, 2)
         painter.setPen(RED_BRIGHT if destructive_admin else GREEN_BRIGHT)
@@ -2724,7 +2758,12 @@ class ConfigWidget(QWidget):
         if selected_index is None:
             selected_index = self.selected_index
         selected = index == selected_index
-        editing = index == 1 and self.editing_volume
+        editing = (
+            (self.settings_section == "sounds" and index == 0 and self.editing_volume)
+            or (self.settings_section == "display" and index == 0 and self.editing_brightness)
+            or (self.settings_section == "display" and index == 1 and self.editing_sleep_timeout)
+            or (self.settings_section == "display" and index == 3 and self.editing_screensaver)
+        )
 
         if selected:
             painter.fillRect(
