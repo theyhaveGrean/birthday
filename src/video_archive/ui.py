@@ -64,10 +64,33 @@ DETAIL_RIGHT_INSET = 60
 FONT_FAMILY = "DejaVu Sans Mono"
 FONT_WEIGHT = QFont.Bold
 
+# One set of metrics for every selectable list rendered in the left pane.
+# Keep these values shared so a change cannot make Gallery, Memos, or Settings
+# drift apart again.
+LEFT_PANE_FONT_SIZE = 18
+LEFT_PANE_ROW_HEIGHT = 54
+LEFT_PANE_ROW_GAP = 8
+LEFT_PANE_ROW_STEP = LEFT_PANE_ROW_HEIGHT + LEFT_PANE_ROW_GAP
+LEFT_PANE_TEXT_INSET = 24
+
 
 def ui_font(size):
     """Return the application font, keeping family and weight consistent."""
     return QFont(FONT_FAMILY, size, FONT_WEIGHT)
+
+
+def left_pane_font():
+    return ui_font(LEFT_PANE_FONT_SIZE)
+
+
+def draw_left_pane_label(painter, rect, text, flags=Qt.AlignLeft | Qt.AlignVCenter):
+    """Draw a left-pane label at the shared size without shortening it."""
+    painter.setFont(left_pane_font())
+    painter.drawText(
+        rect,
+        flags | Qt.TextWordWrap | Qt.TextWrapAnywhere,
+        str(text),
+    )
 
 
 def content_bottom(widget):
@@ -87,9 +110,6 @@ SLOT_WIDTH = 300
 SLOT_HEIGHT = 100
 
 SPACING = 330
-
-MAX_TITLE_FONT_SIZE = 34
-MIN_TITLE_FONT_SIZE = 18
 
 HOME_APPS = ("GALLERY", "MEMOS", "SETTINGS")
 SETTINGS_MENU = ("INFO", "WIFI", "SOUNDS", "DISPLAY", "ABOUT", "REBOOT", "BACK")
@@ -190,21 +210,15 @@ def draw_fitted_wrapped_text(
     starting_size,
     minimum_size=12,
 ):
-    width = max(1, rect.width())
-    height = max(1, rect.height())
-    for size in range(starting_size, minimum_size - 1, -1):
-        font = QFont("DejaVu Sans Mono", size, QFont.Bold)
-        metrics = QFontMetrics(font)
-        if (
-            metrics.horizontalAdvance(text) <= width
-            or metrics.lineSpacing() * 2 <= height
-        ):
-            painter.setFont(font)
-            painter.drawText(rect, flags | Qt.TextWordWrap, text)
-            return
-
-    painter.setFont(QFont("DejaVu Sans Mono", minimum_size, QFont.Bold))
-    painter.drawText(rect, flags | Qt.TextWordWrap, text)
+    # Keep the legacy helper name for callers, but use the same fixed metrics
+    # as every other left-pane label. The old implementation silently changed
+    # the font size per memo/date, which was another source of visual drift.
+    painter.setFont(left_pane_font())
+    painter.drawText(
+        rect,
+        flags | Qt.TextWordWrap | Qt.TextWrapAnywhere,
+        str(text),
+    )
 
 
 def current_clock_time():
@@ -568,7 +582,7 @@ class HomeWidget(QWidget):
         else:
             painter.setPen(TEXT_MAIN)
 
-        painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
+        painter.setFont(left_pane_font())
         painter.drawText(
             rect.adjusted(24, 0, -24, 0),
             Qt.AlignLeft | Qt.AlignVCenter,
@@ -633,9 +647,8 @@ class HomeWidget(QWidget):
 
         menu_left = MENU_LEFT
         menu_top = CONTENT_TOP
-        row_height = 60
-        row_gap = 10
-        row_step = row_height + row_gap
+        row_height = LEFT_PANE_ROW_HEIGHT
+        row_step = LEFT_PANE_ROW_STEP
         detail_top = menu_top
         content_bottom = self.height() - 105
         detail = detail_rect(self, detail_top, content_bottom)
@@ -948,50 +961,6 @@ class GalleryWidget(QWidget):
         self.update()
 
     # =====================================================
-    # FONT FITTING
-    # =====================================================
-
-    def fitted_title_font(
-        self,
-        painter,
-        title,
-        max_width,
-    ):
-        """
-        Shrink long titles until they fit in their slot.
-        Short titles stay at the full 34 px size.
-        """
-
-        size = MAX_TITLE_FONT_SIZE
-
-        while size >= MIN_TITLE_FONT_SIZE:
-
-            font = QFont(
-                "DejaVu Sans Mono",
-                size,
-                QFont.Bold,
-            )
-
-            painter.setFont(font)
-
-            width = (
-                painter
-                .fontMetrics()
-                .horizontalAdvance(title)
-            )
-
-            if width <= max_width:
-                return font
-
-            size -= 1
-
-        return QFont(
-            "DejaVu Sans Mono",
-            MIN_TITLE_FONT_SIZE,
-            QFont.Bold,
-        )
-
-    # =====================================================
     # PAINT
     # =====================================================
 
@@ -1052,9 +1021,8 @@ class GalleryWidget(QWidget):
         list_width = MENU_WIDTH
         divider_x = DIVIDER_X
         content_bottom = self.height() - 105
-        row_height = 56
-        row_gap = 8
-        row_step = row_height + row_gap
+        row_height = LEFT_PANE_ROW_HEIGHT
+        row_step = LEFT_PANE_ROW_STEP
         available_h = max(row_height, content_bottom - content_top)
         visible_rows = min(len(self.titles), max(1, available_h // row_step))
         start = self.visible_start_for_index(
@@ -1097,7 +1065,7 @@ class GalleryWidget(QWidget):
 
         painter.save()
         painter.setClipRect(QRect(list_left, content_top, list_width, available_h))
-        painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
+        painter.setFont(left_pane_font())
         paint_start = min(start, target_start)
         paint_end = min(len(self.titles), max(start, target_start) + visible_rows + 1)
         if highlight_y is not None:
@@ -1122,13 +1090,15 @@ class GalleryWidget(QWidget):
                 painter.setPen(GREEN_BRIGHT)
             else:
                 painter.setPen(TEXT_MAIN)
-            metrics = painter.fontMetrics()
-            display_title = metrics.elidedText(self.titles[index], Qt.ElideMiddle, list_width - 92)
-            painter.drawText(row.adjusted(24, 0, -70, 0), Qt.AlignLeft | Qt.AlignVCenter, display_title)
+            draw_left_pane_label(
+                painter,
+                row.adjusted(LEFT_PANE_TEXT_INSET, 2, -70, -2),
+                self.titles[index],
+            )
             painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
             painter.setPen(GREEN_MAIN if selected else TEXT_DIM)
             painter.drawText(row.adjusted(24, 0, -14, 0), Qt.AlignRight | Qt.AlignVCenter, f"{index + 1:02}")
-            painter.setFont(QFont("DejaVu Sans Mono", 24, QFont.Bold))
+            painter.setFont(left_pane_font())
         painter.restore()
 
         painter.setPen(GREEN_DIM)
@@ -1147,10 +1117,13 @@ class GalleryWidget(QWidget):
         painter.drawText(detail, Qt.AlignLeft | Qt.AlignTop, "ARCHIVE ENTRY")
         painter.setFont(QFont("DejaVu Sans Mono", 16, QFont.Bold))
         painter.setPen(TEXT_MAIN)
-        detail_metrics = painter.fontMetrics()
         selected_title = self.titles[self.selected_index]
-        display_detail = detail_metrics.elidedText(selected_title, Qt.ElideMiddle, max(1, detail.width()))
-        painter.drawText(detail.adjusted(0, 58, 0, 0), Qt.AlignLeft | Qt.AlignTop, display_detail)
+        draw_left_pane_label(
+            painter,
+            detail.adjusted(0, 58, 0, 0),
+            selected_title,
+            Qt.AlignLeft | Qt.AlignTop,
+        )
         painter.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
         painter.setPen(TEXT_DIM)
         painter.drawText(detail.adjusted(0, 118, 0, 0), Qt.AlignLeft | Qt.AlignTop, f"FILE {self.selected_index + 1:02} / {len(self.titles):02}\nSELECT // PLAY")
@@ -1274,7 +1247,7 @@ class SettingsRenderer:
         menu_top = CONTENT_TOP
         footer_rule_y = widget.height() - 75
         content_bottom = footer_rule_y - 18
-        row_gap = 10
+        row_gap = LEFT_PANE_ROW_GAP
         row_height = max(40, min(60, (content_bottom - menu_top - row_gap * (len(menu) - 1)) // len(menu)))
         row_step = row_height + row_gap
         detail_top = menu_top
@@ -1468,7 +1441,7 @@ class MemoRenderer:
         painter.drawLine(DIVIDER_X, left.top(), DIVIDER_X, left.bottom())
 
         memo_rows = list(memos)
-        row_height = 54
+        row_height = LEFT_PANE_ROW_HEIGHT
         visible_memos = max(1, left.height() // row_height)
         start = max(
             0,
@@ -1501,8 +1474,8 @@ class MemoRenderer:
                 date_rect.adjusted(0, 4, 0, -4),
                 Qt.AlignLeft | Qt.AlignVCenter,
                 item.get("date", "--"),
-                18,
-                12,
+                LEFT_PANE_FONT_SIZE,
+                LEFT_PANE_FONT_SIZE,
             )
             if unread:
                 painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
@@ -1882,8 +1855,8 @@ class AdminRenderer:
     def draw(self, painter, host):
         menu_left = MENU_LEFT
         menu_top = CONTENT_TOP
-        row_height = 58
-        row_step = 72
+        row_height = LEFT_PANE_ROW_HEIGHT
+        row_step = LEFT_PANE_ROW_STEP
         detail = detail_rect(host)
         actions = ADMIN_ACTIONS
 
@@ -1907,7 +1880,7 @@ class AdminRenderer:
                 pen.setWidth(3)
                 painter.setPen(pen)
                 painter.drawRect(action_rect)
-                painter.setFont(QFont("DejaVu Sans Mono", 17, QFont.Bold))
+                painter.setFont(left_pane_font())
                 painter.setPen(RED_BRIGHT)
                 painter.drawText(
                     action_rect.adjusted(18, 0, -12, 0),
@@ -2777,11 +2750,10 @@ class ConfigWidget(QWidget):
         else:
             painter.setPen(TEXT_MAIN)
 
-        label_size = max(17, min(24, rect.height() - 17))
-        painter.setFont(QFont("DejaVu Sans Mono", label_size, QFont.Bold))
+        painter.setFont(left_pane_font())
         painter.drawText(
             rect.adjusted(24, 0, -24, 0),
-            Qt.AlignLeft | Qt.AlignVCenter,
+            Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap,
             label,
         )
 
