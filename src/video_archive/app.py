@@ -231,9 +231,13 @@ def load_settings():
     settings["led_brightness"] = clamp_int_or_default(
         settings.get("led_brightness"), 0, 100, DEFAULT_SETTINGS["led_brightness"]
     )
-    settings["sleep_brightness"] = clamp_int_or_default(
-        settings.get("sleep_brightness"), 0, 100, DEFAULT_SETTINGS["sleep_brightness"]
+    # ``sleep_brightness`` was the old, ambiguous display-sleep setting. Keep
+    # it as a migration source, but use it for the sleep LED from now on.
+    settings["sleep_led_brightness"] = clamp_int_or_default(
+        settings.get("sleep_led_brightness", settings.get("sleep_brightness")),
+        0, 100, DEFAULT_SETTINGS["sleep_led_brightness"]
     )
+    settings.pop("sleep_brightness", None)
     settings["sleep_timeout_minutes"] = clamp_int_or_default(
         settings.get("sleep_timeout_minutes"),
         1,
@@ -841,7 +845,7 @@ class VideoArchiveWindow(QMainWindow):
             self.settings["wake_on_memo"],
             self.settings["brightness"],
             self.settings["led_brightness"],
-            self.settings["sleep_brightness"],
+            self.settings["sleep_led_brightness"],
             self.settings["sleep_timeout_minutes"],
             self.settings["screensaver_mode"],
         )
@@ -904,7 +908,7 @@ class VideoArchiveWindow(QMainWindow):
         self.input_controller = InputController()
         self.display = DisplayController(
             self.settings["brightness"],
-            sleep_brightness=self.settings["sleep_brightness"],
+            sleep_led_brightness=self.settings["sleep_led_brightness"],
             led_brightness=self.settings["led_brightness"],
         )
 
@@ -967,8 +971,8 @@ class VideoArchiveWindow(QMainWindow):
             self._set_led_brightness
         )
 
-        self.config_page.sleep_brightness_changed.connect(
-            self._set_sleep_brightness
+        self.config_page.sleep_led_brightness_changed.connect(
+            self._set_sleep_led_brightness
         )
 
         self.config_page.sleep_timeout_changed.connect(
@@ -1359,7 +1363,7 @@ class VideoArchiveWindow(QMainWindow):
         self.config_page.set_wake_on_memo(self.settings["wake_on_memo"])
         self.config_page.set_brightness(self.settings["brightness"])
         self.config_page.set_led_brightness(self.settings["led_brightness"])
-        self.config_page.set_sleep_brightness(self.settings["sleep_brightness"])
+        self.config_page.set_sleep_led_brightness(self.settings["sleep_led_brightness"])
         self.config_page.set_screensaver_mode(self.settings["screensaver_mode"])
 
     def _open_memos(self):
@@ -1602,17 +1606,17 @@ class VideoArchiveWindow(QMainWindow):
         self.display.set_brightness(self.settings["brightness"])
         self._restart_display_sleep_timer()
 
-    def _set_sleep_brightness(self, brightness):
-        previous = self.settings["sleep_brightness"]
-        self.settings["sleep_brightness"] = clamp_int(brightness, 0, 100)
+    def _set_sleep_led_brightness(self, brightness):
+        previous = self.settings["sleep_led_brightness"]
+        self.settings["sleep_led_brightness"] = clamp_int(brightness, 0, 100)
         try:
             save_settings(self.settings)
         except OSError as error:
-            self.settings["sleep_brightness"] = previous
-            self.config_page.set_sleep_brightness(previous)
-            print(f"failed to save sleep brightness setting: {error}", flush=True)
+            self.settings["sleep_led_brightness"] = previous
+            self.config_page.set_sleep_led_brightness(previous)
+            print(f"failed to save sleep LED brightness setting: {error}", flush=True)
             return
-        self.display.set_sleep_brightness(self.settings["sleep_brightness"])
+        self.display.set_sleep_led_brightness(self.settings["sleep_led_brightness"])
 
     def _set_led_brightness(self, brightness):
         previous = self.settings["led_brightness"]

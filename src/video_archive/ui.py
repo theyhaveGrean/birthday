@@ -114,7 +114,7 @@ SPACING = 330
 HOME_APPS = ("GALLERY", "MEMOS", "SETTINGS")
 SETTINGS_MENU = ("INFO", "WIFI", "SOUNDS", "DISPLAY", "ABOUT", "REBOOT", "BACK")
 SOUNDS_MENU = ("MASTER VOLUME", "SFX", "MEMO CHIME", "BACK")
-DISPLAY_MENU = ("BRIGHTNESS", "LED BRIGHTNESS", "SLEEP BRIGHTNESS", "SLEEP AFTER", "WAKE ON MEMO", "SCREENSAVER", "BACK")
+DISPLAY_MENU = ("BRIGHTNESS", "LED BRIGHTNESS", "SLEEP LED BRIGHTNESS", "SLEEP AFTER", "WAKE ON MEMO", "SCREENSAVER", "BACK")
 SCREENSAVER_LABELS = {
     "default": "DEFAULT",
     "clock": "RETRO CLOCK",
@@ -1256,13 +1256,32 @@ class SettingsRenderer:
         footer_rule_y = widget.height() - 75
         content_bottom = footer_rule_y - 18
         row_gap = LEFT_PANE_ROW_GAP
-        row_height = max(40, min(60, (content_bottom - menu_top - row_gap * (len(menu) - 1)) // len(menu)))
+        # Keep rows readable and scroll the list when it is taller than the
+        # available pane. This is especially important for Display settings.
+        row_height = 50
+        visible_count = max(1, (content_bottom - menu_top + row_gap) // (row_height + row_gap))
+        max_scroll = max(0, len(menu) - visible_count)
+        scroll = min(max(0, widget.selected_index - visible_count + 1), max_scroll)
         row_step = row_height + row_gap
         detail_top = menu_top
         detail = detail_rect(widget, detail_top, content_bottom)
 
-        for index, label in enumerate(menu):
-            widget._draw_option(painter, index, QRect(menu_left, menu_top + index * row_step, MENU_WIDTH, row_height), label, "")
+        for visible_index in range(visible_count):
+            index = scroll + visible_index
+            if index >= len(menu):
+                break
+            widget._draw_option(
+                painter, index,
+                QRect(menu_left, menu_top + visible_index * row_step, MENU_WIDTH, row_height),
+                menu[index], ""
+            )
+
+        if max_scroll:
+            track = QRect(menu_left + MENU_WIDTH + 10, menu_top, 4, content_bottom - menu_top)
+            thumb_height = max(30, int(track.height() * visible_count / len(menu)))
+            thumb_top = track.top() + int((track.height() - thumb_height) * scroll / max_scroll)
+            painter.fillRect(track, GREEN_DIM)
+            painter.fillRect(QRect(track.left(), thumb_top, track.width(), thumb_height), GREEN_BRIGHT)
 
         painter.setPen(GREEN_DIM)
         painter.drawLine(DIVIDER_X, detail_top, DIVIDER_X, content_bottom)
@@ -1283,7 +1302,7 @@ class SettingsRenderer:
             detail_title = (
                 "DISPLAY LEVEL",
                 "POWER LED",
-                "SLEEP LEVEL",
+                "SLEEP LED LEVEL",
                 "DISPLAY SLEEP",
                 "DISPLAY WAKE",
                 "SCREENSAVER",
@@ -1294,7 +1313,7 @@ class SettingsRenderer:
             elif widget.selected_index == 1:
                 detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_led_brightness else f"LED BRIGHTNESS // {widget.led_brightness:03}%"
             elif widget.selected_index == 2:
-                detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_sleep_brightness else f"SLEEP BRIGHTNESS // {widget.sleep_brightness:03}%"
+                detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_sleep_brightness else f"SLEEP LED BRIGHTNESS // {widget.sleep_led_brightness:03}%"
             elif widget.selected_index == 3:
                 detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_sleep_timeout else f"SLEEP AFTER // {widget.sleep_timeout_minutes} MIN"
             elif widget.selected_index == 4:
@@ -1363,7 +1382,7 @@ class SettingsRenderer:
                 painter.fillRect(bar.adjusted(2, 2, -bar.width() + fill_width, -2), GREEN_BRIGHT if widget.editing_led_brightness else GREEN_MAIN)
         elif widget.settings_section == "display" and widget.selected_index == 2:
             bar = QRect(detail.left(), detail.top() + 125, detail.width(), 18)
-            fill_width = int(bar.width() * widget.sleep_brightness / 100)
+            fill_width = int(bar.width() * widget.sleep_led_brightness / 100)
             painter.setPen(GREEN_DIM)
             painter.drawRect(bar)
             if fill_width > 0:
@@ -2018,7 +2037,9 @@ class ConfigWidget(QWidget):
     screensaver_changed = Signal(str)
     brightness_changed = Signal(int)
     led_brightness_changed = Signal(int)
-    sleep_brightness_changed = Signal(int)
+    sleep_led_brightness_changed = Signal(int)
+    # Kept as an API alias for integrations using the old signal name.
+    sleep_brightness_changed = sleep_led_brightness_changed
     sleep_timeout_changed = Signal(int)
     wifi_scan_requested = Signal()
     wifi_connect_requested = Signal(str, str)
@@ -2042,7 +2063,7 @@ class ConfigWidget(QWidget):
         wake_on_memo,
         brightness,
         led_brightness,
-        sleep_brightness,
+        sleep_led_brightness,
         sleep_timeout_minutes,
         screensaver_mode=DEFAULT_SCREENSAVER_MODE,
     ):
@@ -2061,7 +2082,7 @@ class ConfigWidget(QWidget):
         self.wake_on_memo = bool(wake_on_memo)
         self.brightness = max(5, min(100, int(brightness)))
         self.led_brightness = max(0, min(100, int(led_brightness)))
-        self.sleep_brightness = max(0, min(100, int(sleep_brightness)))
+        self.sleep_led_brightness = max(0, min(100, int(sleep_led_brightness)))
         self.sleep_timeout_minutes = max(1, min(60, int(sleep_timeout_minutes)))
         self.screensaver_mode = self._clean_screensaver_mode(screensaver_mode)
         self.screen = ConfigScreen.SETTINGS
@@ -2341,9 +2362,22 @@ class ConfigWidget(QWidget):
         self.brightness = max(5, min(100, int(brightness)))
         self.update()
 
-    def set_sleep_brightness(self, brightness):
-        self.sleep_brightness = max(0, min(100, int(brightness)))
+    def set_sleep_led_brightness(self, brightness):
+        self.sleep_led_brightness = max(0, min(100, int(brightness)))
         self.update()
+
+    @property
+    def sleep_brightness(self):
+        """Compatibility alias for the sleep LED brightness value."""
+        return self.sleep_led_brightness
+
+    @sleep_brightness.setter
+    def sleep_brightness(self, brightness):
+        self.sleep_led_brightness = max(0, min(100, int(brightness)))
+
+    def set_sleep_brightness(self, brightness):
+        """Compatibility alias for the renamed sleep LED control."""
+        self.set_sleep_led_brightness(brightness)
 
     def set_led_brightness(self, brightness):
         self.led_brightness = max(0, min(100, int(brightness)))
@@ -2484,8 +2518,8 @@ class ConfigWidget(QWidget):
             self.set_brightness(self.brightness - 5)
             self.brightness_changed.emit(self.brightness)
         elif self.editing_sleep_brightness:
-            self.set_sleep_brightness(self.sleep_brightness - 5)
-            self.sleep_brightness_changed.emit(self.sleep_brightness)
+            self.set_sleep_led_brightness(self.sleep_led_brightness - 5)
+            self.sleep_led_brightness_changed.emit(self.sleep_led_brightness)
         elif self.editing_led_brightness:
             self.set_led_brightness(self.led_brightness - 5)
             self.led_brightness_changed.emit(self.led_brightness)
@@ -2540,8 +2574,8 @@ class ConfigWidget(QWidget):
             self.set_brightness(self.brightness + 5)
             self.brightness_changed.emit(self.brightness)
         elif self.editing_sleep_brightness:
-            self.set_sleep_brightness(self.sleep_brightness + 5)
-            self.sleep_brightness_changed.emit(self.sleep_brightness)
+            self.set_sleep_led_brightness(self.sleep_led_brightness + 5)
+            self.sleep_led_brightness_changed.emit(self.sleep_led_brightness)
         elif self.editing_led_brightness:
             self.set_led_brightness(self.led_brightness + 5)
             self.led_brightness_changed.emit(self.led_brightness)

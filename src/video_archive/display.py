@@ -39,15 +39,26 @@ class DisplayController:
     # VID/PID, so /dev/hidraw numbering may change safely across boots.
     DEVICE_PATH_ENV = "VIDEO_ARCHIVE_DISPLAY_HID_PATH"
 
-    def __init__(self, brightness=80, led=None, sleep_brightness=0, led_brightness=50):
+    def __init__(
+        self, brightness=80, led=None, sleep_brightness=None,
+        led_brightness=50, sleep_led_brightness=None
+    ):
         self._brightness = clamp_int(
             brightness, self.MIN_CONFIGURED_BRIGHTNESS, self.MAX_BRIGHTNESS
         )
-        self._sleep_brightness = clamp_int(
-            sleep_brightness, self.MIN_BRIGHTNESS, self.MAX_BRIGHTNESS
-        )
+        # The display must never go fully dark while sleeping. The legacy
+        # sleep_brightness argument is accepted for callers upgrading from
+        # older versions, but is intentionally ignored by the new behavior.
+        self._sleep_brightness = self.MIN_CONFIGURED_BRIGHTNESS
         self._led_brightness = clamp_int(
             led_brightness, self.MIN_BRIGHTNESS, self.MAX_BRIGHTNESS
+        )
+        if sleep_led_brightness is None:
+            sleep_led_brightness = sleep_brightness
+        if sleep_led_brightness is None:
+            sleep_led_brightness = self._led_brightness
+        self._sleep_led_brightness = clamp_int(
+            sleep_led_brightness, self.MIN_BRIGHTNESS, self.MAX_BRIGHTNESS
         )
         self._sleeping = False
         self._device_path: Path | None = None
@@ -91,6 +102,10 @@ class DisplayController:
         return self._led_brightness
 
     @property
+    def sleep_led_brightness(self):
+        return self._sleep_led_brightness
+
+    @property
     def device_path(self):
         """Return the cached hidraw path, if one has been discovered."""
         return str(self._device_path) if self._device_path is not None else None
@@ -103,12 +118,15 @@ class DisplayController:
             self._set_status_led(True)
             self.apply_brightness(self._brightness)
 
-    def set_sleep_brightness(self, brightness):
-        self._sleep_brightness = clamp_int(
+    def set_sleep_led_brightness(self, brightness):
+        self._sleep_led_brightness = clamp_int(
             brightness, self.MIN_BRIGHTNESS, self.MAX_BRIGHTNESS
         )
         if self._sleeping:
-            self.apply_brightness(self._sleep_brightness)
+            self._set_status_led(self._sleep_led_brightness > 0)
+
+    def set_sleep_brightness(self, brightness):
+        """Compatibility no-op; sleeping display brightness is fixed."""
 
     def set_led_brightness(self, brightness):
         self._led_brightness = clamp_int(
@@ -119,7 +137,7 @@ class DisplayController:
 
     def sleep(self):
         self._sleeping = True
-        self._set_status_led(False)
+        self._set_status_led(self._sleep_led_brightness > 0)
         self.apply_brightness(self._sleep_brightness)
 
     def wake(self):
