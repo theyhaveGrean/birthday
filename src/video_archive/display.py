@@ -13,7 +13,15 @@ import os
 import sys
 from pathlib import Path
 
-from rpi_hardware_pwm import HardwarePWM, HardwarePWMException
+try:
+    from rpi_hardware_pwm import HardwarePWM, HardwarePWMException
+except ImportError:  # Keep the UI usable when the optional Pi PWM package is absent.
+    HardwarePWM = None
+
+    class HardwarePWMException(Exception):
+        """Fallback exception type used when rpi-hardware-pwm is unavailable."""
+
+from gpiozero import PWMLED
 
 from .storage import clamp_int
 
@@ -26,6 +34,8 @@ class _HardwarePWMLED:
     PWM_CHIP = 2
 
     def __init__(self):
+        if HardwarePWM is None:
+            raise HardwarePWMException("rpi-hardware-pwm is not installed")
         self._pwm = HardwarePWM(
             pwm_channel=self.PWM_CHANNEL,
             hz=self.FREQUENCY_HZ,
@@ -97,6 +107,14 @@ class DisplayController:
         self.apply_brightness(self._brightness)
 
     def _create_status_led(self):
+        if HardwarePWM is None:
+            try:
+                return PWMLED(self.STATUS_LED_GPIO)
+            except (OSError, RuntimeError, ValueError) as error:
+                self._report_error_once(
+                    "led", f"GPIO {self.STATUS_LED_GPIO} unavailable: {error}"
+                )
+                return None
         try:
             return _HardwarePWMLED()
         except (HardwarePWMException, OSError, RuntimeError, ValueError) as error:
