@@ -13,9 +13,38 @@ import os
 import sys
 from pathlib import Path
 
-from gpiozero import PWMLED
+from rpi_hardware_pwm import HardwarePWM, HardwarePWMException
 
 from .storage import clamp_int
+
+
+class _HardwarePWMLED:
+    """Expose a gpiozero-like value interface for Raspberry Pi hardware PWM."""
+
+    FREQUENCY_HZ = 100
+    PWM_CHANNEL = 1
+    PWM_CHIP = 2
+
+    def __init__(self):
+        self._pwm = HardwarePWM(
+            pwm_channel=self.PWM_CHANNEL,
+            hz=self.FREQUENCY_HZ,
+            chip=self.PWM_CHIP,
+        )
+        self._value = 0.0
+        self._pwm.start(0)
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, value):
+        self._value = max(0.0, min(1.0, float(value)))
+        self._pwm.change_duty_cycle(self._value * 100)
+
+    def close(self):
+        self._pwm.stop()
 
 
 class DisplayController:
@@ -69,8 +98,8 @@ class DisplayController:
 
     def _create_status_led(self):
         try:
-            return PWMLED(self.STATUS_LED_GPIO)
-        except (OSError, RuntimeError, ValueError) as error:
+            return _HardwarePWMLED()
+        except (HardwarePWMException, OSError, RuntimeError, ValueError) as error:
             # Keep display startup usable when running off-device or before the
             # GPIO permissions/pin factory have been configured.
             self._report_error_once("led", f"GPIO {self.STATUS_LED_GPIO} unavailable: {error}")

@@ -1,3 +1,4 @@
 # Python packages required by the deployed Raspberry Pi app.
 PySide6>=6.6,<7
 gpiozero>=2.0,<3
+rpi-hardware-pwm>=0.3,<1
