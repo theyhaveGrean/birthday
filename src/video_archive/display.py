@@ -13,6 +13,8 @@ import os
 import sys
 from pathlib import Path
 
+from gpiozero import PWMLED
+
 from .storage import clamp_int
 
 
@@ -29,19 +31,41 @@ class DisplayController:
     HID_PACKET_SIZE = 64
     DEVICE_MAX_BRIGHTNESS = 90
 
+    STATUS_LED_GPIO = 26
+    STATUS_LED_DUTY_CYCLE = 0.5
+
     # Useful for development/tests and as an escape hatch if sysfs layout ever
     # changes.  Normally this is intentionally unset and the device is found by
     # VID/PID, so /dev/hidraw numbering may change safely across boots.
     DEVICE_PATH_ENV = "VIDEO_ARCHIVE_DISPLAY_HID_PATH"
 
-    def __init__(self, brightness=80):
+    def __init__(self, brightness=80, led=None):
         self._brightness = clamp_int(
             brightness, self.MIN_CONFIGURED_BRIGHTNESS, self.MAX_BRIGHTNESS
         )
         self._sleeping = False
         self._device_path: Path | None = None
         self._last_error: tuple[str, str] | None = None
+        self._led = led if led is not None else self._create_status_led()
+        self._set_status_led(True)
         self.apply_brightness(self._brightness)
+
+    def _create_status_led(self):
+        try:
+            return PWMLED(self.STATUS_LED_GPIO)
+        except (OSError, RuntimeError, ValueError) as error:
+            # Keep display startup usable when running off-device or before the
+            # GPIO permissions/pin factory have been configured.
+            self._report_error_once("led", f"GPIO {self.STATUS_LED_GPIO} unavailable: {error}")
+            return None
+
+    def _set_status_led(self, enabled):
+        if self._led is None:
+            return
+        try:
+            self._led.value = self.STATUS_LED_DUTY_CYCLE if enabled else 0
+        except (AttributeError, OSError, RuntimeError) as error:
+            self._report_error_once("led", f"GPIO {self.STATUS_LED_GPIO} write failed: {error}")
 
     @property
     def brightness(self):
@@ -65,13 +89,25 @@ class DisplayController:
 
     def sleep(self):
         self._sleeping = True
+        self._set_status_led(False)
         self.apply_brightness(self.MIN_BRIGHTNESS)
 
     def wake(self):
         was_sleeping = self._sleeping
         self._sleeping = False
+        self._set_status_led(True)
         self.apply_brightness(self._brightness)
         return was_sleeping
+
+    def close(self):
+        """Turn off and release the status LED during application shutdown."""
+        if self._led is None:
+            return
+        try:
+            self._led.value = 0
+            self._led.close()
+        except (AttributeError, OSError, RuntimeError) as error:
+            self._report_error_once("led", f"GPIO {self.STATUS_LED_GPIO} close failed: {error}")
 
     def apply_brightness(self, brightness):
         value = clamp_int(brightness, self.MIN_BRIGHTNESS, self.MAX_BRIGHTNESS)

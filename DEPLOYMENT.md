@@ -16,6 +16,7 @@ GPIO mapping:
 - left / previous: GPIO 27
 - select: GPIO 17
 - right / next: GPIO 22
+- status LED: GPIO 26 (PWM 50% while the display is awake; off while sleeping)
 
 
 ## LCD USB brightness permissions

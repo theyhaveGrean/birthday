@@ -2523,6 +2523,7 @@ class VideoArchiveWindow(QMainWindow):
             silent=True
         )
         self.input_controller.close()
+        self.display.close()
 
         event.accept()
 

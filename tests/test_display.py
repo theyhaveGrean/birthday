@@ -2,13 +2,46 @@ from video_archive.display import DisplayController
 
 
 class RecordingDisplay(DisplayController):
-    def __init__(self, brightness=80):
+    def __init__(self, brightness=80, led=None):
         self.writes = []
-        super().__init__(brightness)
+        super().__init__(brightness, led=led)
 
     def _write_brightness(self, brightness):
         self.writes.append(brightness)
         return True
+
+
+class RecordingLED:
+    def __init__(self):
+        self.values = []
+        self.closed = False
+
+    @property
+    def value(self):
+        return self.values[-1]
+
+    @value.setter
+    def value(self, value):
+        self.values.append(value)
+
+    def close(self):
+        self.closed = True
+
+
+def test_status_led_tracks_display_state_at_half_pwm():
+    led = RecordingLED()
+    display = RecordingDisplay(75, led=led)
+    assert led.values[-1] == 0.5
+
+    display.sleep()
+    assert led.values[-1] == 0
+
+    display.wake()
+    assert led.values[-1] == 0.5
+
+    display.close()
+    assert led.values[-1] == 0
+    assert led.closed is True
 
 
 def test_sleep_dims_to_minimum_and_wake_restores_brightness():
