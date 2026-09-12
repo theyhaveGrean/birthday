@@ -1,11 +1,11 @@
 {
-  "volume": 65,
+  "volume": 30,
   "sfx_enabled": true,
   "memo_chime_enabled": true,
   "wake_on_memo": true,
   "brightness": 35,
   "led_brightness": 5,
-  "sleep_brightness": 5,
+  "sleep_led_brightness": 5,
   "sleep_timeout_minutes": 1,
   "screensaver_mode": "clock",
   "cloud_message_url": "https://rrwyqfddvijgimcslqkl.supabase.co/rest/v1/notes"

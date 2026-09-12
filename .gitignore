@@ -21,6 +21,4 @@ memos.json
 .DS_Store
 
 # Local media (keep large personal files out of Git)
-videos_raw/
-normalized_videos/*
-!normalized_videos/.gitkeep
+videos/

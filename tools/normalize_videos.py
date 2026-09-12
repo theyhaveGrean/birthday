@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import argparse
+import re
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -11,6 +13,8 @@ sys.path.insert(0, str(SRC_DIR))
 from video_archive.config import VIDEO_DIR
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v"}
+PADDED_LANDSCAPE_OUTPUT = (1920, 1080)
+CROP_RE = re.compile(r"crop=(\d+):(\d+):(\d+):(\d+)")
 
 
 def find_videos(input_dir):
@@ -43,6 +47,89 @@ def bitrate_to_kbps(value):
     )
 
 
+def _video_dimensions(source):
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=p=0",
+            str(source),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+
+    try:
+        width, height = (
+            int(value)
+            for value in result.stdout.strip().split(",")[:2]
+        )
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return width, height
+
+
+def detect_padded_landscape_crop(source):
+    """Return a crop for a landscape image letterboxed in a portrait stream.
+
+    cropdetect needs a higher threshold for some 10-bit/HDR sources whose
+    encoded black is not represented as literal 8-bit zero.  The landscape
+    aspect-ratio and full-width checks keep ordinary portrait videos intact.
+    """
+    dimensions = _video_dimensions(source)
+    if not dimensions:
+        return None
+    source_width, source_height = dimensions
+    if source_width >= source_height:
+        return None
+
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-i",
+            str(source),
+            "-vf",
+            "cropdetect=limit=64:round=2:reset=0",
+            "-an",
+            "-f",
+            "null",
+            "-",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+
+    candidates = []
+    for width, height, x, y in CROP_RE.findall(result.stderr or ""):
+        width, height, x, y = map(int, (width, height, x, y))
+        aspect = width / height if height else 0
+        if (
+            aspect >= 1.5
+            and width >= source_width * 0.8
+            and height <= source_height * 0.8
+            and x + width <= source_width
+            and y + height <= source_height
+        ):
+            candidates.append((width, height, x, y))
+
+    if not candidates:
+        return None
+    return Counter(candidates).most_common(1)[0][0]
+
+
 def build_ffmpeg_command(
     source,
     target,
@@ -51,13 +138,19 @@ def build_ffmpeg_command(
     video_bitrate,
     audio_bitrate,
     fps,
+    crop=None,
 ):
-    scale_filter = (
+    filters = []
+    if crop:
+        crop_width, crop_height, crop_x, crop_y = crop
+        filters.append(f"crop={crop_width}:{crop_height}:{crop_x}:{crop_y}")
+    filters.append(
         f"scale={width}:{height}:"
         "force_original_aspect_ratio=decrease,"
         f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
         "setsar=1"
     )
+    scale_filter = ",".join(filters)
     buffer_size = f"{bitrate_to_kbps(video_bitrate) * 2}k"
 
     command = [
@@ -184,6 +277,25 @@ def normalize_videos(args):
             audio_bitrate=args.audio_bitrate,
             fps=args.fps,
         )
+
+        crop = None
+        if not args.dry_run:
+            crop = detect_padded_landscape_crop(source)
+        if crop:
+            width, height = PADDED_LANDSCAPE_OUTPUT
+            command = build_ffmpeg_command(
+                source=source,
+                target=target,
+                width=width,
+                height=height,
+                video_bitrate=args.video_bitrate,
+                audio_bitrate=args.audio_bitrate,
+                fps=args.fps,
+                crop=crop,
+            )
+            print(
+                f"CROP {source.name}: {crop[0]}x{crop[1]} at {crop[2]},{crop[3]}"
+            )
 
         print(
             f"ENCODE {source.name} -> {target.name}"
