@@ -23,6 +23,8 @@ DEFAULT_SETTINGS = {
     "memo_chime_enabled": True,
     "wake_on_memo": True,
     "brightness": 80,
+    "led_brightness": 50,
+    "sleep_brightness": 0,
     "sleep_timeout_minutes": 5,
     "screensaver_mode": DEFAULT_SCREENSAVER_MODE,
     "cloud_message_url": "",

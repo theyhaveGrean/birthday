@@ -4,6 +4,8 @@
   "memo_chime_enabled": true,
   "wake_on_memo": true,
   "brightness": 5,
+  "led_brightness": 50,
+  "sleep_brightness": 0,
   "sleep_timeout_minutes": 1,
   "screensaver_mode": "clock",
   "cloud_message_url": "https://rrwyqfddvijgimcslqkl.supabase.co/rest/v1/notes"

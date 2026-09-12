@@ -114,7 +114,7 @@ SPACING = 330
 HOME_APPS = ("GALLERY", "MEMOS", "SETTINGS")
 SETTINGS_MENU = ("INFO", "WIFI", "SOUNDS", "DISPLAY", "ABOUT", "REBOOT", "BACK")
 SOUNDS_MENU = ("MASTER VOLUME", "SFX", "MEMO CHIME", "BACK")
-DISPLAY_MENU = ("BRIGHTNESS", "SLEEP AFTER", "WAKE ON MEMO", "SCREENSAVER", "BACK")
+DISPLAY_MENU = ("BRIGHTNESS", "LED BRIGHTNESS", "SLEEP BRIGHTNESS", "SLEEP AFTER", "WAKE ON MEMO", "SCREENSAVER", "BACK")
 SCREENSAVER_LABELS = {
     "default": "DEFAULT",
     "clock": "RETRO CLOCK",
@@ -1282,6 +1282,8 @@ class SettingsRenderer:
         elif widget.settings_section == "display":
             detail_title = (
                 "DISPLAY LEVEL",
+                "POWER LED",
+                "SLEEP LEVEL",
                 "DISPLAY SLEEP",
                 "DISPLAY WAKE",
                 "SCREENSAVER",
@@ -1290,10 +1292,14 @@ class SettingsRenderer:
             if widget.selected_index == 0:
                 detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_brightness else f"BRIGHTNESS // {widget.brightness:03}%"
             elif widget.selected_index == 1:
-                detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_sleep_timeout else f"SLEEP AFTER // {widget.sleep_timeout_minutes} MIN"
+                detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_led_brightness else f"LED BRIGHTNESS // {widget.led_brightness:03}%"
             elif widget.selected_index == 2:
-                detail_text = "WAKE ON MEMO // ENABLED" if widget.wake_on_memo else "WAKE ON MEMO // DISABLED"
+                detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_sleep_brightness else f"SLEEP BRIGHTNESS // {widget.sleep_brightness:03}%"
             elif widget.selected_index == 3:
+                detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_sleep_timeout else f"SLEEP AFTER // {widget.sleep_timeout_minutes} MIN"
+            elif widget.selected_index == 4:
+                detail_text = "WAKE ON MEMO // ENABLED" if widget.wake_on_memo else "WAKE ON MEMO // DISABLED"
+            elif widget.selected_index == 5:
                 mode = SCREENSAVER_LABELS[widget.screensaver_mode]
                 detail_text = (
                     f"MODE // {mode}\nLEFT/RIGHT CHOOSE   SELECT DONE"
@@ -1350,6 +1356,20 @@ class SettingsRenderer:
                 painter.fillRect(bar.adjusted(2, 2, -bar.width() + fill_width, -2), GREEN_BRIGHT if widget.editing_brightness else GREEN_MAIN)
         elif widget.settings_section == "display" and widget.selected_index == 1:
             bar = QRect(detail.left(), detail.top() + 125, detail.width(), 18)
+            fill_width = int(bar.width() * widget.led_brightness / 100)
+            painter.setPen(GREEN_DIM)
+            painter.drawRect(bar)
+            if fill_width > 0:
+                painter.fillRect(bar.adjusted(2, 2, -bar.width() + fill_width, -2), GREEN_BRIGHT if widget.editing_led_brightness else GREEN_MAIN)
+        elif widget.settings_section == "display" and widget.selected_index == 2:
+            bar = QRect(detail.left(), detail.top() + 125, detail.width(), 18)
+            fill_width = int(bar.width() * widget.sleep_brightness / 100)
+            painter.setPen(GREEN_DIM)
+            painter.drawRect(bar)
+            if fill_width > 0:
+                painter.fillRect(bar.adjusted(2, 2, -bar.width() + fill_width, -2), GREEN_BRIGHT if widget.editing_sleep_brightness else GREEN_MAIN)
+        elif widget.settings_section == "display" and widget.selected_index == 3:
+            bar = QRect(detail.left(), detail.top() + 125, detail.width(), 18)
             fill_width = int(bar.width() * widget.sleep_timeout_minutes / 60)
             painter.setPen(GREEN_DIM)
             painter.drawRect(bar)
@@ -1370,9 +1390,9 @@ class SettingsRenderer:
             )
         elif widget.settings_section == "sounds" and widget.selected_index in (1, 2):
             widget._draw_settings_toggle(painter, detail, widget.sfx_enabled if widget.selected_index == 1 else widget.memo_chime_enabled)
-        elif widget.settings_section == "display" and widget.selected_index == 2:
+        elif widget.settings_section == "display" and widget.selected_index == 4:
             widget._draw_settings_toggle(painter, detail, widget.wake_on_memo)
-        elif widget.settings_section == "display" and widget.selected_index == 3:
+        elif widget.settings_section == "display" and widget.selected_index == 5:
             widget._draw_screensaver_selector(painter, detail)
 
         if widget.settings_section is None and widget.selected_index == 5:
@@ -1997,6 +2017,8 @@ class ConfigWidget(QWidget):
     wake_on_memo_changed = Signal(bool)
     screensaver_changed = Signal(str)
     brightness_changed = Signal(int)
+    led_brightness_changed = Signal(int)
+    sleep_brightness_changed = Signal(int)
     sleep_timeout_changed = Signal(int)
     wifi_scan_requested = Signal()
     wifi_connect_requested = Signal(str, str)
@@ -2019,6 +2041,8 @@ class ConfigWidget(QWidget):
         memo_chime_enabled,
         wake_on_memo,
         brightness,
+        led_brightness,
+        sleep_brightness,
         sleep_timeout_minutes,
         screensaver_mode=DEFAULT_SCREENSAVER_MODE,
     ):
@@ -2036,6 +2060,8 @@ class ConfigWidget(QWidget):
         self.memo_chime_enabled = bool(memo_chime_enabled)
         self.wake_on_memo = bool(wake_on_memo)
         self.brightness = max(5, min(100, int(brightness)))
+        self.led_brightness = max(0, min(100, int(led_brightness)))
+        self.sleep_brightness = max(0, min(100, int(sleep_brightness)))
         self.sleep_timeout_minutes = max(1, min(60, int(sleep_timeout_minutes)))
         self.screensaver_mode = self._clean_screensaver_mode(screensaver_mode)
         self.screen = ConfigScreen.SETTINGS
@@ -2043,6 +2069,8 @@ class ConfigWidget(QWidget):
         self.settings_section = None
         self.editing_volume = False
         self.editing_brightness = False
+        self.editing_led_brightness = False
+        self.editing_sleep_brightness = False
         self.editing_sleep_timeout = False
         self.editing_screensaver = False
         self.confirming_reboot = False
@@ -2219,6 +2247,8 @@ class ConfigWidget(QWidget):
         self.settings_section = None
         self.editing_volume = False
         self.editing_brightness = False
+        self.editing_led_brightness = False
+        self.editing_sleep_brightness = False
         self.editing_sleep_timeout = False
         self.editing_screensaver = False
         self.confirming_reboot = False
@@ -2230,6 +2260,8 @@ class ConfigWidget(QWidget):
         self.settings_section = None
         self.editing_volume = False
         self.editing_brightness = False
+        self.editing_led_brightness = False
+        self.editing_sleep_brightness = False
         self.editing_sleep_timeout = False
         self.editing_screensaver = False
         self.confirming_reboot = False
@@ -2245,6 +2277,8 @@ class ConfigWidget(QWidget):
             self.screen == ConfigScreen.SETTINGS
             and not self.editing_volume
             and not self.editing_brightness
+            and not self.editing_led_brightness
+            and not self.editing_sleep_brightness
             and not self.editing_sleep_timeout
             and not self.editing_screensaver
             and not self.confirming_reboot
@@ -2305,6 +2339,14 @@ class ConfigWidget(QWidget):
 
     def set_brightness(self, brightness):
         self.brightness = max(5, min(100, int(brightness)))
+        self.update()
+
+    def set_sleep_brightness(self, brightness):
+        self.sleep_brightness = max(0, min(100, int(brightness)))
+        self.update()
+
+    def set_led_brightness(self, brightness):
+        self.led_brightness = max(0, min(100, int(brightness)))
         self.update()
 
     def set_sleep_timeout(self, minutes):
@@ -2441,6 +2483,12 @@ class ConfigWidget(QWidget):
         elif self.editing_brightness:
             self.set_brightness(self.brightness - 5)
             self.brightness_changed.emit(self.brightness)
+        elif self.editing_sleep_brightness:
+            self.set_sleep_brightness(self.sleep_brightness - 5)
+            self.sleep_brightness_changed.emit(self.sleep_brightness)
+        elif self.editing_led_brightness:
+            self.set_led_brightness(self.led_brightness - 5)
+            self.led_brightness_changed.emit(self.led_brightness)
         elif self.editing_sleep_timeout:
             self.set_sleep_timeout(self.sleep_timeout_minutes - 1)
             self.sleep_timeout_changed.emit(self.sleep_timeout_minutes)
@@ -2491,6 +2539,12 @@ class ConfigWidget(QWidget):
         elif self.editing_brightness:
             self.set_brightness(self.brightness + 5)
             self.brightness_changed.emit(self.brightness)
+        elif self.editing_sleep_brightness:
+            self.set_sleep_brightness(self.sleep_brightness + 5)
+            self.sleep_brightness_changed.emit(self.sleep_brightness)
+        elif self.editing_led_brightness:
+            self.set_led_brightness(self.led_brightness + 5)
+            self.led_brightness_changed.emit(self.led_brightness)
         elif self.editing_sleep_timeout:
             self.set_sleep_timeout(self.sleep_timeout_minutes + 1)
             self.sleep_timeout_changed.emit(self.sleep_timeout_minutes)
@@ -2562,15 +2616,21 @@ class ConfigWidget(QWidget):
             if self.selected_index == 0:
                 self.editing_brightness = not self.editing_brightness
             elif self.selected_index == 1:
-                self.editing_sleep_timeout = not self.editing_sleep_timeout
+                self.editing_led_brightness = not self.editing_led_brightness
             elif self.selected_index == 2:
+                self.editing_sleep_brightness = not self.editing_sleep_brightness
+            elif self.selected_index == 3:
+                self.editing_sleep_timeout = not self.editing_sleep_timeout
+            elif self.selected_index == 4:
                 self.wake_on_memo = not self.wake_on_memo
                 self.wake_on_memo_changed.emit(self.wake_on_memo)
-            elif self.selected_index == 3:
+            elif self.selected_index == 5:
                 self.editing_screensaver = not self.editing_screensaver
             else:
                 self.settings_section = None
                 self.editing_brightness = False
+                self.editing_led_brightness = False
+                self.editing_sleep_brightness = False
                 self.editing_sleep_timeout = False
                 self.editing_screensaver = False
                 self.selected_index = 3
@@ -2762,8 +2822,10 @@ class ConfigWidget(QWidget):
         editing = (
             (self.settings_section == "sounds" and index == 0 and self.editing_volume)
             or (self.settings_section == "display" and index == 0 and self.editing_brightness)
-            or (self.settings_section == "display" and index == 1 and self.editing_sleep_timeout)
-            or (self.settings_section == "display" and index == 3 and self.editing_screensaver)
+            or (self.settings_section == "display" and index == 1 and self.editing_led_brightness)
+            or (self.settings_section == "display" and index == 2 and self.editing_sleep_brightness)
+            or (self.settings_section == "display" and index == 3 and self.editing_sleep_timeout)
+            or (self.settings_section == "display" and index == 5 and self.editing_screensaver)
         )
 
         if selected:

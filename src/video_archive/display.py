@@ -39,9 +39,15 @@ class DisplayController:
     # VID/PID, so /dev/hidraw numbering may change safely across boots.
     DEVICE_PATH_ENV = "VIDEO_ARCHIVE_DISPLAY_HID_PATH"
 
-    def __init__(self, brightness=80, led=None):
+    def __init__(self, brightness=80, led=None, sleep_brightness=0, led_brightness=50):
         self._brightness = clamp_int(
             brightness, self.MIN_CONFIGURED_BRIGHTNESS, self.MAX_BRIGHTNESS
+        )
+        self._sleep_brightness = clamp_int(
+            sleep_brightness, self.MIN_BRIGHTNESS, self.MAX_BRIGHTNESS
+        )
+        self._led_brightness = clamp_int(
+            led_brightness, self.MIN_BRIGHTNESS, self.MAX_BRIGHTNESS
         )
         self._sleeping = False
         self._device_path: Path | None = None
@@ -63,7 +69,8 @@ class DisplayController:
         if self._led is None:
             return
         try:
-            self._led.value = self.STATUS_LED_DUTY_CYCLE if enabled else 0
+            duty_cycle = self._led_brightness / self.MAX_BRIGHTNESS
+            self._led.value = duty_cycle if enabled else 0
         except (AttributeError, OSError, RuntimeError) as error:
             self._report_error_once("led", f"GPIO {self.STATUS_LED_GPIO} write failed: {error}")
 
@@ -76,6 +83,14 @@ class DisplayController:
         return self._sleeping
 
     @property
+    def sleep_brightness(self):
+        return self._sleep_brightness
+
+    @property
+    def led_brightness(self):
+        return self._led_brightness
+
+    @property
     def device_path(self):
         """Return the cached hidraw path, if one has been discovered."""
         return str(self._device_path) if self._device_path is not None else None
@@ -85,12 +100,27 @@ class DisplayController:
             brightness, self.MIN_CONFIGURED_BRIGHTNESS, self.MAX_BRIGHTNESS
         )
         if not self._sleeping:
+            self._set_status_led(True)
             self.apply_brightness(self._brightness)
+
+    def set_sleep_brightness(self, brightness):
+        self._sleep_brightness = clamp_int(
+            brightness, self.MIN_BRIGHTNESS, self.MAX_BRIGHTNESS
+        )
+        if self._sleeping:
+            self.apply_brightness(self._sleep_brightness)
+
+    def set_led_brightness(self, brightness):
+        self._led_brightness = clamp_int(
+            brightness, self.MIN_BRIGHTNESS, self.MAX_BRIGHTNESS
+        )
+        if not self._sleeping:
+            self._set_status_led(self._led_brightness > 0)
 
     def sleep(self):
         self._sleeping = True
         self._set_status_led(False)
-        self.apply_brightness(self.MIN_BRIGHTNESS)
+        self.apply_brightness(self._sleep_brightness)
 
     def wake(self):
         was_sleeping = self._sleeping

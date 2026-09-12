@@ -28,9 +28,12 @@ class RecordingLED:
         self.closed = True
 
 
-def test_status_led_tracks_display_state_at_half_pwm():
+def test_status_led_tracks_display_brightness_and_sleep_state():
     led = RecordingLED()
     display = RecordingDisplay(75, led=led)
+    assert led.values[-1] == 0.5
+
+    display.set_brightness(40)
     assert led.values[-1] == 0.5
 
     display.sleep()
@@ -42,6 +45,28 @@ def test_status_led_tracks_display_state_at_half_pwm():
     display.close()
     assert led.values[-1] == 0
     assert led.closed is True
+
+
+def test_sleep_brightness_only_applies_to_display():
+    led = RecordingLED()
+    display = RecordingDisplay(75, led=led, sleep_brightness=20)
+
+    display.sleep()
+    assert display.writes[-1] == 20
+    assert led.values[-1] == 0
+
+    display.set_sleep_brightness(0)
+    assert display.writes[-1] == 0
+    assert led.values[-1] == 0
+
+
+def test_screen_brightness_does_not_change_led_brightness():
+    led = RecordingLED()
+    display = RecordingDisplay(75, led=led, led_brightness=20)
+
+    assert led.values[-1] == 0.2
+    display.set_brightness(40)
+    assert led.values[-1] == 0.2
 
 
 def test_sleep_dims_to_minimum_and_wake_restores_brightness():

@@ -55,6 +55,8 @@ def _config_widget(qapp=None):
         True,
         True,
         80,
+        50,
+        0,
         5,
     )
 
@@ -193,7 +195,7 @@ def test_settings_sounds_and_display_back_navigation():
     widget.selected_index = 3
     widget.select()
     assert widget.settings_section == "display"
-    widget.selected_index = 4
+    widget.selected_index = 6
     widget.select()
     assert widget.settings_section is None
     assert widget.selected_index == 3
@@ -204,7 +206,7 @@ def test_display_settings_selects_screensaver_mode():
     widget.show_settings_home()
     widget.selected_index = 3
     widget.select()
-    widget.selected_index = 3
+    widget.selected_index = 5
 
     emitted = []
     widget.screensaver_changed.connect(lambda mode: emitted.append(mode))
@@ -219,6 +221,42 @@ def test_display_settings_selects_screensaver_mode():
     widget.select()
     assert widget.editing_screensaver is False
     assert emitted == ["clock", "black", "clock"]
+
+
+def test_display_settings_adjusts_and_emits_brightness():
+    widget = _config_widget()
+    widget.show_settings_home()
+    widget.selected_index = 3
+    widget.select()
+    widget.selected_index = 0
+
+    emitted = []
+    widget.brightness_changed.connect(emitted.append)
+    widget.select()
+    assert widget.editing_brightness is True
+
+    widget.move_left()
+    assert widget.brightness == 75
+    assert emitted == [75]
+
+    widget.select()
+    assert widget.editing_brightness is False
+
+
+def test_display_settings_adjusts_sleep_brightness_to_off():
+    widget = _config_widget()
+    widget.show_settings_home()
+    widget.selected_index = 3
+    widget.select()
+    widget.selected_index = 2
+
+    emitted = []
+    widget.sleep_brightness_changed.connect(emitted.append)
+    widget.select()
+    widget.move_left()
+
+    assert widget.sleep_brightness == 0
+    assert emitted == [0]
 
 
 def test_wifi_back_returns_to_settings_screen():
