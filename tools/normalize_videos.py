@@ -227,7 +227,7 @@ def parse_args():
 
     parser.add_argument(
         "--input-dir",
-        default=str(VIDEO_DIR.parent / "videos_raw"),
+        default=str(VIDEO_DIR.parent / "videos"),
         help="Directory containing source videos.",
     )
     parser.add_argument(
