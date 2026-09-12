@@ -114,7 +114,7 @@ SPACING = 330
 HOME_APPS = ("GALLERY", "MEMOS", "SETTINGS")
 SETTINGS_MENU = ("INFO", "WIFI", "SOUNDS", "DISPLAY", "ABOUT", "REBOOT", "BACK")
 SOUNDS_MENU = ("MASTER VOLUME", "SFX", "MEMO CHIME", "BACK")
-DISPLAY_MENU = ("BRIGHTNESS", "LED BRIGHTNESS", "SLEEP LED", "SLEEP AFTER", "WAKE ON MEMO", "SCREENSAVER", "BACK")
+DISPLAY_MENU = ("BRIGHTNESS", "LED BRIGHTNESS", "SLEEP INDICATOR", "SLEEP AFTER", "WAKE ON MEMO", "SCREENSAVER", "BACK")
 SCREENSAVER_LABELS = {
     "default": "DEFAULT",
     "clock": "RETRO CLOCK",
@@ -1302,7 +1302,7 @@ class SettingsRenderer:
             detail_title = (
                 "DISPLAY LEVEL",
                 "POWER LED",
-                "SLEEP LED LEVEL",
+                "SLEEP INDICATOR LEVEL",
                 "DISPLAY SLEEP",
                 "DISPLAY WAKE",
                 "SCREENSAVER",
@@ -1313,7 +1313,7 @@ class SettingsRenderer:
             elif widget.selected_index == 1:
                 detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_led_brightness else f"LED BRIGHTNESS // {widget.led_brightness:03}%"
             elif widget.selected_index == 2:
-                detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_sleep_brightness else f"SLEEP LED BRIGHTNESS // {widget.sleep_led_brightness:03}%"
+                detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_sleep_brightness else f"SLEEP INDICATOR // {widget.sleep_led_brightness:03}%"
             elif widget.selected_index == 3:
                 detail_text = "LEFT/RIGHT ADJUST   SELECT DONE" if widget.editing_sleep_timeout else f"SLEEP AFTER // {widget.sleep_timeout_minutes} MIN"
             elif widget.selected_index == 4:
@@ -2874,10 +2874,13 @@ class ConfigWidget(QWidget):
         else:
             painter.setPen(TEXT_MAIN)
 
-        painter.setFont(left_pane_font())
+        label_rect = rect.adjusted(24, 0, -24, 0)
+        # Settings labels share a fixed-height row. Fit them to the available
+        # width instead of allowing Qt to wrap and clip them into the next row.
+        painter.setFont(fitted_mono_font(label, label_rect.width(), LEFT_PANE_FONT_SIZE, 12))
         painter.drawText(
-            rect.adjusted(24, 0, -24, 0),
-            Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap,
+            label_rect,
+            Qt.AlignLeft | Qt.AlignVCenter | Qt.TextSingleLine,
             label,
         )
 
