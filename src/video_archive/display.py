@@ -31,7 +31,7 @@ class DisplayController:
     HID_PACKET_SIZE = 64
     DEVICE_MAX_BRIGHTNESS = 90
 
-    STATUS_LED_GPIO = 26
+    STATUS_LED_GPIO = 13
     STATUS_LED_DUTY_CYCLE = 0.5
 
     # Useful for development/tests and as an escape hatch if sysfs layout ever
