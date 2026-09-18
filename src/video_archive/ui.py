@@ -1,14 +1,15 @@
-import os
 import random
 from collections import deque
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PySide6.QtCore import QRect, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 from .cloud import memo_key
+from .timestamps import (
+    TIMEZONE_ENV, DEFAULT_CLOCK_TIMEZONE, current_clock_time,
+    format_stored_timestamp,
+)
 from .config import (
     ANIMATION_STEP_MS,
     ANIMATION_STEPS,
@@ -38,8 +39,6 @@ RED_BG = QColor("#16090A")
 TEXT_MAIN = QColor("#A8DFA3")
 TEXT_DIM = QColor("#577A55")
 
-TIMEZONE_ENV = "VIDEO_ARCHIVE_TIMEZONE"
-DEFAULT_CLOCK_TIMEZONE = "America/Los_Angeles"
 
 
 # =========================================================
@@ -48,7 +47,7 @@ DEFAULT_CLOCK_TIMEZONE = "America/Los_Angeles"
 
 GALLERY_CENTER_Y = 390
 
-# The application is rendered for a fixed 800x480 display.  Keep all pages on
+# The application is rendered for a 1024x600 display. Keep all pages on
 # the same visual grid so navigation does not make the left pane or type jump.
 FRAME_INSET = 60
 FRAME_HEADER_Y = 105
@@ -202,6 +201,32 @@ def draw_fitted_text(painter, rect, flags, text, starting_size, minimum_size=12)
     painter.drawText(rect, flags, metrics.elidedText(text, Qt.ElideRight, rect.width()))
 
 
+def draw_navigation_footer(painter, widget, text):
+    painter.setPen(TEXT_DIM)
+    draw_fitted_text(
+        painter,
+        QRect(60, widget.height() - 67, widget.width() - 120, 26),
+        Qt.AlignLeft | Qt.AlignBottom | Qt.TextSingleLine,
+        text, 13, 11,
+    )
+
+
+def gallery_title_lines(title, metrics, width, max_lines=2):
+    """Bound detail titles to two readable lines; keep controls below them."""
+    remaining = str(title)
+    lines = []
+    for _ in range(max_lines - 1):
+        if metrics.horizontalAdvance(remaining) <= width:
+            break
+        cut = 1
+        while cut < len(remaining) and metrics.horizontalAdvance(remaining[:cut + 1]) <= width:
+            cut += 1
+        lines.append(remaining[:cut])
+        remaining = remaining[cut:]
+    lines.append(metrics.elidedText(remaining, Qt.ElideRight, width))
+    return lines
+
+
 def draw_fitted_wrapped_text(
     painter,
     rect,
@@ -220,23 +245,13 @@ def draw_fitted_wrapped_text(
 
 def memo_date_parts(value):
     """Return the memo timestamp as separate, compact date and time lines."""
-    text = str(value or "--").strip()
+    text = format_stored_timestamp(value or "--").strip()
     if not text:
         return "--", "--"
     parts = text.replace("T", " ", 1).split(None, 1)
     date = parts[0]
     time = parts[1].split()[0] if len(parts) > 1 else "--"
     return date, time
-
-
-def current_clock_time():
-    timezone_name = os.environ.get(TIMEZONE_ENV, DEFAULT_CLOCK_TIMEZONE).strip()
-    if timezone_name:
-        try:
-            return datetime.now(ZoneInfo(timezone_name))
-        except ZoneInfoNotFoundError:
-            pass
-    return datetime.now(timezone.utc).astimezone()
 
 
 def draw_tracking_glitch(painter, width, height, phase):
@@ -721,6 +736,10 @@ class HomeWidget(QWidget):
             painter.setPen(RED_BRIGHT)
             painter.drawText(badge, Qt.AlignCenter, "UNREAD")
 
+        draw_navigation_footer(
+            painter, self, "LEFT/RIGHT CHOOSE   SELECT OPEN   HOLD SELECT: HOME"
+        )
+
 
 class AmbientSleepWidget(QWidget):
     def __init__(self, mode=DEFAULT_SCREENSAVER_MODE, parent=None):
@@ -1098,10 +1117,12 @@ class GalleryWidget(QWidget):
                 painter.setPen(GREEN_BRIGHT)
             else:
                 painter.setPen(TEXT_MAIN)
-            draw_left_pane_label(
+            draw_fitted_text(
                 painter,
                 row.adjusted(LEFT_PANE_TEXT_INSET, 2, -70, -2),
+                Qt.AlignLeft | Qt.AlignVCenter | Qt.TextSingleLine,
                 self.titles[index],
+                LEFT_PANE_FONT_SIZE, 14,
             )
             painter.setFont(QFont("DejaVu Sans Mono", 12, QFont.Bold))
             painter.setPen(GREEN_MAIN if selected else TEXT_DIM)
@@ -1126,15 +1147,13 @@ class GalleryWidget(QWidget):
         painter.setFont(QFont("DejaVu Sans Mono", 16, QFont.Bold))
         painter.setPen(TEXT_MAIN)
         selected_title = self.titles[self.selected_index]
-        draw_left_pane_label(
-            painter,
-            detail.adjusted(0, 58, 0, 0),
-            selected_title,
-            Qt.AlignLeft | Qt.AlignTop,
-        )
+        painter.setFont(QFont(FONT_FAMILY, 18, FONT_WEIGHT))
+        title_lines = gallery_title_lines(selected_title, painter.fontMetrics(), detail.width())
+        title_rect = QRect(detail.left(), detail.top() + 58, detail.width(), 68)
+        painter.drawText(title_rect, Qt.AlignLeft | Qt.AlignTop, "\n".join(title_lines))
         painter.setFont(QFont("DejaVu Sans Mono", 13, QFont.Bold))
         painter.setPen(TEXT_DIM)
-        painter.drawText(detail.adjusted(0, 118, 0, 0), Qt.AlignLeft | Qt.AlignTop, f"FILE {self.selected_index + 1:02} / {len(self.titles):02}\nSELECT // PLAY")
+        painter.drawText(detail.adjusted(0, 140, 0, 0), Qt.AlignLeft | Qt.AlignTop, f"FILE {self.selected_index + 1:02} / {len(self.titles):02}\nSELECT // PLAY")
         painter.drawText(QRect(60, self.height() - 67, self.width() - 120, 26), Qt.AlignLeft | Qt.AlignBottom, "LEFT/RIGHT // BROWSE   SELECT // PLAY   HOLD SELECT: HOME")
 
 class TextPanelPage:
@@ -1423,6 +1442,19 @@ class SettingsRenderer:
                 "REBOOTING" if widget.reboot_status.lower().startswith("rebooting") else "REBOOT FAILED" if widget.reboot_status else "SELECT TO CONFIRM" if widget.confirming_reboot else "WAITING",
             )
 
+        editing = any((
+            widget.editing_volume, widget.editing_brightness,
+            widget.editing_led_brightness, widget.editing_sleep_brightness,
+            widget.editing_sleep_timeout, widget.editing_screensaver,
+        ))
+        if editing:
+            hint = "LEFT/RIGHT ADJUST   SELECT DONE   HOLD SELECT: HOME"
+        elif widget.confirming_reboot:
+            hint = "LEFT/RIGHT CANCEL   SELECT CONFIRM   HOLD SELECT: HOME"
+        else:
+            hint = "LEFT/RIGHT CHOOSE   SELECT OPEN/CHANGE   HOLD SELECT: HOME"
+        draw_navigation_footer(painter, widget, hint)
+
 
 class ConfigScreen:
     SETTINGS = "settings"
@@ -1516,7 +1548,7 @@ class MemoRenderer:
                 else TEXT_MAIN
             )
             date_width = left.width() - 92 if unread else left.width() - 32
-            date, time = memo_date_parts(item.get("date", "--"))
+            date, time = memo_date_parts(item.get("created_at") or item.get("date", "--"))
             date_rect = QRect(left.left() + 24, y + 3, date_width, 27)
             draw_fitted_wrapped_text(
                 painter,
@@ -2395,6 +2427,28 @@ class ConfigWidget(QWidget):
         self.wifi_status = status
         self.update()
 
+    def cancel_pending_confirmations(self):
+        self.confirming_reboot = False
+        if self.admin_confirm_action:
+            self.admin_confirm_action = ""
+            if not self.admin_busy:
+                self.admin_status = ""
+        self.update()
+
+    def update_wifi_profiles(self, profiles):
+        """Update only saved metadata; never replace another password editor."""
+        by_ssid = {}
+        for profile in profiles:
+            by_ssid.setdefault(profile["ssid"], []).append(profile["uuid"])
+        for network in self.wifi_networks:
+            network["profile_uuids"] = list(by_ssid.get(network["ssid"], []))
+            network["saved"] = bool(network["profile_uuids"])
+        if (self.wifi_stage == "saved"
+                and 0 <= self.wifi_selected_index < len(self.wifi_networks)
+                and not self.wifi_networks[self.wifi_selected_index].get("saved")):
+            self.wifi_stage = "networks"
+        self.update()
+
     def wifi_connection_succeeded(self):
         self.wifi_password = ""
         if self.wifi_stage in {"password", "saved"}:
@@ -2673,7 +2727,6 @@ class ConfigWidget(QWidget):
             self.info_page.scroll = 0
         elif self.selected_index == 1:
             self.showing_wifi = True
-            self.begin_wifi_scan()
             self.wifi_scan_requested.emit()
         elif self.selected_index == 2:
             self.settings_section = "sounds"
@@ -2703,7 +2756,6 @@ class ConfigWidget(QWidget):
     def _select_wifi(self):
         if self.wifi_stage == "networks":
             if self.wifi_selected_index == len(self.wifi_networks):
-                self.begin_wifi_scan()
                 self.wifi_scan_requested.emit()
                 return
 
@@ -2713,6 +2765,7 @@ class ConfigWidget(QWidget):
                 return
 
             if self.wifi_selected_index == len(self.wifi_networks) + 2:
+                self.wifi_session += 1
                 self.showing_wifi = False
                 return
 
@@ -3143,7 +3196,7 @@ class TransitionWidget(QWidget):
             main_text = prefix + display_title
             sub_text = "TRACKING / SYNC / FIELD LOCK"
         else:
-            main_text = "RETURNING // GALLERY"
+            main_text = "RETURNING"
             sub_text = "EXIT SIGNAL CONFIRMED"
 
         main_rect = QRect(

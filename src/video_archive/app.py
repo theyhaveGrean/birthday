@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -63,6 +64,8 @@ VIDEO_EXTENSIONS = {".mp4", ".mov"}
 MAX_MPV_VOLUME = 150
 CLOUD_POLL_MS = 60000
 CLOUD_RETRY_MS = 15000
+WIFI_ACTIVATION_WAIT_SECONDS = 90
+WIFI_ACTIVATION_TIMEOUT_SECONDS = WIFI_ACTIVATION_WAIT_SECONDS + 15
 
 
 def normalize_screensaver_mode(value):
@@ -113,7 +116,9 @@ def _load_wifi_profiles():
     )
     profiles = []
     if result.returncode != 0:
-        return profiles
+        raise OSError(_friendly_nmcli_error(
+            result.stderr or result.stdout, "profile query failed"
+        ))
     for line in result.stdout.splitlines():
         fields = _split_nmcli_terse(line)
         if len(fields) < 3:
@@ -127,16 +132,63 @@ def _load_wifi_profiles():
                  "connection", "show", "uuid", uuid],
                 check=False, capture_output=True, text=True, timeout=5,
             )
-        except (OSError, subprocess.TimeoutExpired):
-            continue
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise OSError("saved profile query failed") from error
         if details.returncode != 0:
-            continue
+            raise OSError("saved profile query failed")
         for detail in details.stdout.splitlines():
             values = _split_nmcli_terse(detail)
             if len(values) == 2 and values[0] == "802-11-wireless.ssid" and values[1]:
                 profiles.append({"uuid": uuid, "name": name, "ssid": values[1]})
                 break
     return profiles
+
+
+def _profiles_after_wifi_change():
+    try:
+        return _load_wifi_profiles()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _wifi_activation_succeeded(*, ssid=None, profile_uuid=None):
+    """Reconcile a timeout against the connected device, not cached UI state."""
+    try:
+        result = subprocess.run(
+            ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status"],
+            check=False, capture_output=True, text=True, timeout=5,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+        if result.returncode != 0:
+            return False
+        for line in result.stdout.splitlines():
+            fields = _split_nmcli_terse(line)
+            if len(fields) < 3 or fields[1] != "wifi" or fields[2] != "connected":
+                continue
+            active = subprocess.run(
+                ["nmcli", "-g", "GENERAL.CON-UUID", "device", "show", fields[0]],
+                check=False, capture_output=True, text=True, timeout=5,
+            )
+            if active.returncode != 0:
+                continue
+            uuid = active.stdout.strip()
+            if profile_uuid is not None:
+                if uuid == profile_uuid:
+                    return True
+                continue
+            details = subprocess.run(
+                ["nmcli", "-t", "-f", "802-11-wireless.ssid",
+                 "connection", "show", "uuid", uuid],
+                check=False, capture_output=True, text=True, timeout=5,
+            )
+            if details.returncode == 0:
+                for detail in details.stdout.splitlines():
+                    values = _split_nmcli_terse(detail)
+                    if values == ["802-11-wireless.ssid", ssid]:
+                        return True
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return False
 
 
 def _friendly_nmcli_error(output, default):
@@ -185,7 +237,7 @@ def load_videos():
     if ORDER_FILE.exists():
         try:
             order_lines = ORDER_FILE.read_text().splitlines()
-        except OSError as error:
+        except (OSError, UnicodeError) as error:
             print(f"failed to read order file: {error}", flush=True)
             order_lines = []
 
@@ -216,7 +268,7 @@ def load_settings():
     if SETTINGS_FILE.exists():
         try:
             loaded = json.loads(SETTINGS_FILE.read_text())
-        except (OSError, json.JSONDecodeError):
+        except (OSError, UnicodeError, json.JSONDecodeError):
             loaded = {}
 
         if isinstance(loaded, dict):
@@ -278,7 +330,7 @@ def load_note():
 
     try:
         return NOTE_FILE.read_text().strip()
-    except OSError as error:
+    except (OSError, UnicodeError) as error:
         print(f"failed to read note file: {error}", flush=True)
         return DEFAULT_NOTE
 
@@ -655,9 +707,9 @@ class PlaybackPage(QWidget):
 
         painter.drawText(
             QRect(
-                self.width() - 310,
+                self.width() // 2,
                 self.height() - 54,
-                268,
+                self.width() // 2 - 42,
                 30,
             ),
             Qt.AlignRight | Qt.AlignVCenter,
@@ -746,10 +798,10 @@ class PlaybackPage(QWidget):
 
 class VideoArchiveWindow(QMainWindow):
     wifi_scan_finished = Signal(object, str)
-    wifi_connect_finished = Signal(bool, str)
+    wifi_connect_finished = Signal(bool, str, object)
     wifi_status_finished = Signal(object)
     wifi_disconnect_finished = Signal(bool, str)
-    wifi_forget_finished = Signal(bool, str)
+    wifi_forget_finished = Signal(bool, str, object)
     admin_wifi_reset_finished = Signal(bool, str)
     admin_memos_reset_finished = Signal(bool, str)
     cloud_message_finished = Signal(str, str)
@@ -792,6 +844,7 @@ class VideoArchiveWindow(QMainWindow):
         self.wifi_status_refresh_pending = False
         self.wifi_disconnect_running = False
         self.wifi_forget_running = False
+        self.wifi_forget_context = None
         self.admin_wifi_reset_running = False
         self.admin_wifi_reset_pending = False
         self.memo_reset_pending = False
@@ -1165,6 +1218,7 @@ class VideoArchiveWindow(QMainWindow):
         if was_sleeping:
             self._resume_visible_effects()
         self._restart_display_sleep_timer()
+        return was_sleeping
 
     def _sleep_display(self):
         # Do not dim while a video is actively loading or playing. The timer
@@ -1172,6 +1226,7 @@ class VideoArchiveWindow(QMainWindow):
         if self.mode in ("loading", "playing", "returning"):
             self._restart_display_sleep_timer()
             return
+        self.config_page.cancel_pending_confirmations()
         self.display.sleep()
         self._pause_visible_effects()
         self.ambient_sleep.set_unread_memo_count(self.unread_memos)
@@ -1180,8 +1235,10 @@ class VideoArchiveWindow(QMainWindow):
         self.pages.setCurrentWidget(self.ambient_sleep)
 
     def _physical_left(self):
-        self._note_activity()
+        woke = self._note_activity()
         self.left_button_down = True
+        if woke:
+            return
         self._start_admin_chord_if_ready()
 
         if self.mode == "start":
@@ -1203,7 +1260,8 @@ class VideoArchiveWindow(QMainWindow):
 
 
     def _physical_select(self):
-        self._note_activity()
+        if self._note_activity():
+            return
         if self.mode == "start":
             if self.start_screen.can_start():
                 self.start_home()
@@ -1234,13 +1292,16 @@ class VideoArchiveWindow(QMainWindow):
 
 
     def _physical_select_held(self):
-        self._note_activity()
+        if self._note_activity():
+            return
         self.audio.play("select")
         self.go_home()
 
     def _physical_right(self):
-        self._note_activity()
+        woke = self._note_activity()
         self.right_button_down = True
+        if woke:
+            return
         self._start_admin_chord_if_ready()
 
         if self.mode == "start":
@@ -1429,6 +1490,7 @@ class VideoArchiveWindow(QMainWindow):
         self.gallery.flicker_timer.stop()
         self.pending_index = index
         self.playback_generation += 1
+        generation = self.playback_generation
 
         self.mpv_ready = False
         self.transition_minimum_elapsed = False
@@ -1449,6 +1511,8 @@ class VideoArchiveWindow(QMainWindow):
         )
 
         QApplication.processEvents()
+        if self.mode != "loading" or generation != self.playback_generation:
+            return
 
         # Keep mpv's X11 target mapped from the start; --wid rendering
         # depends on this on the Pi display stack.
@@ -1460,6 +1524,8 @@ class VideoArchiveWindow(QMainWindow):
         )
 
         QApplication.processEvents()
+        if self.mode != "loading" or generation != self.playback_generation:
+            return
 
         wid = int(
             self.playback_page.video_surface.winId()
@@ -1473,6 +1539,8 @@ class VideoArchiveWindow(QMainWindow):
         self.playback_page.transition.raise_()
 
         QApplication.processEvents()
+        if self.mode != "loading" or generation != self.playback_generation:
+            return
 
         self.playback_watchdog.start()
         self.audio.wait_until_idle()
@@ -1482,7 +1550,7 @@ class VideoArchiveWindow(QMainWindow):
             mpv_volume_from_setting(
                 self.settings["volume"]
             ),
-            self.playback_generation,
+            generation,
         )
 
     def _memo_read(self, memo):
@@ -1777,16 +1845,19 @@ class VideoArchiveWindow(QMainWindow):
 
     def _scan_wifi_worker(self):
         try:
-            subprocess.run(
-                ["nmcli", "radio", "wifi", "on"],
-                check=False,
-                timeout=5,
-            )
-            subprocess.run(
-                ["nmcli", "device", "wifi", "rescan"],
-                check=False,
-                timeout=8,
-            )
+            for command, timeout, failure in (
+                (["nmcli", "radio", "wifi", "on"], 5, "wifi radio enable failed"),
+                (["nmcli", "device", "wifi", "rescan"], 8, "wifi rescan failed"),
+            ):
+                scan_step = subprocess.run(
+                    command, check=False, capture_output=True, text=True, timeout=timeout,
+                )
+                if scan_step.returncode != 0:
+                    output = (scan_step.stderr or scan_step.stdout).strip()
+                    self.wifi_scan_finished.emit(
+                        [], _friendly_nmcli_error(output, failure),
+                    )
+                    return
             result = subprocess.run(
                 [
                     "nmcli",
@@ -1828,7 +1899,7 @@ class VideoArchiveWindow(QMainWindow):
             if not parts:
                 continue
 
-            ssid = parts[0].strip()
+            ssid = parts[0]
             if not ssid or ssid in seen:
                 continue
 
@@ -1977,7 +2048,7 @@ class VideoArchiveWindow(QMainWindow):
         # Keep the password visible in our on-device UI by design, but do not
         # place it in the process argument list where other local processes can
         # inspect it. nmcli --ask accepts the PSK on stdin instead.
-        command = ["nmcli"]
+        command = ["nmcli", "--wait", str(WIFI_ACTIVATION_WAIT_SECONDS)]
         if password:
             command.append("--ask")
         command.extend(["device", "wifi", "connect", ssid])
@@ -1989,13 +2060,20 @@ class VideoArchiveWindow(QMainWindow):
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=WIFI_ACTIVATION_TIMEOUT_SECONDS,
             )
 
         try:
             result = run_connect()
-        except (OSError, subprocess.TimeoutExpired) as error:
-            self.wifi_connect_finished.emit(False, f"connect failed: {error}")
+        except subprocess.TimeoutExpired:
+            connected = _wifi_activation_succeeded(ssid=ssid)
+            self.wifi_connect_finished.emit(
+                connected, "connected" if connected else "connection timed out // retry",
+                _profiles_after_wifi_change() if connected else None,
+            )
+            return
+        except OSError as error:
+            self.wifi_connect_finished.emit(False, f"connect failed: {error}", None)
             return
 
         output = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()
@@ -2020,21 +2098,33 @@ class VideoArchiveWindow(QMainWindow):
                 )
                 result = run_connect()
                 output = ((result.stderr or "") + "\n" + (result.stdout or "")).strip()
-            except (OSError, subprocess.TimeoutExpired):
+            except subprocess.TimeoutExpired:
+                connected = _wifi_activation_succeeded(ssid=ssid)
+                self.wifi_connect_finished.emit(
+                    connected, "connected" if connected else "connection timed out // retry",
+                    _profiles_after_wifi_change() if connected else None,
+                )
+                return
+            except OSError:
                 # Fall through and display the original/last NetworkManager
                 # error instead of crashing the UI.
                 pass
 
-        if result.returncode == 0:
-            self.wifi_connect_finished.emit(True, "connected")
+        if result.returncode == 0 or (
+            result.returncode == 3 and _wifi_activation_succeeded(ssid=ssid)
+        ):
+            self.wifi_connect_finished.emit(True, "connected", _profiles_after_wifi_change())
         else:
             self.wifi_connect_finished.emit(
                 False,
                 _friendly_nmcli_error(output, "connect failed"),
+                None,
             )
 
-    def _wifi_connect_finished(self, connected, status):
+    def _wifi_connect_finished(self, connected, status, profiles=None):
         self.wifi_connect_running = False
+        if profiles is not None:
+            self.config_page.update_wifi_profiles(profiles)
         current_session = (
             self.mode == "config"
             and self.config_page.showing_wifi
@@ -2042,6 +2132,8 @@ class VideoArchiveWindow(QMainWindow):
         )
         self.wifi_connect_context = None
         if current_session:
+            if connected and profiles is None:
+                status = "connected // rescan to refresh saved profiles"
             self.config_page.set_wifi_status(status)
             if connected:
                 self.config_page.wifi_connection_succeeded()
@@ -2076,18 +2168,29 @@ class VideoArchiveWindow(QMainWindow):
         for uuid in profile_uuids:
             try:
                 result = subprocess.run(
-                    ["nmcli", "connection", "up", "uuid", uuid],
+                    ["nmcli", "--wait", str(WIFI_ACTIVATION_WAIT_SECONDS),
+                     "connection", "up", "uuid", uuid],
                     check=False,
                     capture_output=True,
                     text=True,
-                    timeout=30,
+                    timeout=WIFI_ACTIVATION_TIMEOUT_SECONDS,
                 )
-            except (OSError, subprocess.TimeoutExpired) as error:
+            except subprocess.TimeoutExpired:
+                if _wifi_activation_succeeded(profile_uuid=uuid):
+                    self.wifi_connect_finished.emit(
+                        True, "connected", _profiles_after_wifi_change()
+                    )
+                    return
+                errors.append("connection timed out")
+                continue
+            except OSError as error:
                 errors.append(str(error))
                 continue
 
-            if result.returncode == 0:
-                self.wifi_connect_finished.emit(True, "connected")
+            if result.returncode == 0 or (
+                result.returncode == 3 and _wifi_activation_succeeded(profile_uuid=uuid)
+            ):
+                self.wifi_connect_finished.emit(True, "connected", _profiles_after_wifi_change())
                 return
 
             output = (result.stderr or result.stdout or "").strip()
@@ -2097,6 +2200,7 @@ class VideoArchiveWindow(QMainWindow):
         self.wifi_connect_finished.emit(
             False,
             _friendly_nmcli_error(" ".join(errors), "connect failed"),
+            None,
         )
 
     def _disconnect_wifi(self):
@@ -2163,6 +2267,7 @@ class VideoArchiveWindow(QMainWindow):
             return
 
         self.wifi_forget_running = True
+        self.wifi_forget_context = self.config_page.wifi_session
         threading.Thread(
             target=self._forget_wifi_worker,
             args=(uuids,),
@@ -2189,23 +2294,35 @@ class VideoArchiveWindow(QMainWindow):
                 deleted += 1
             else:
                 error = (result.stderr or result.stdout or "").strip()
-                if error:
-                    errors.append(error)
+                errors.append(error or "profile deletion failed")
 
-        if deleted:
-            self.wifi_forget_finished.emit(True, "profile forgotten")
-        elif errors:
+        profiles = _profiles_after_wifi_change()
+        if errors:
             self.wifi_forget_finished.emit(
                 False,
-                _friendly_nmcli_error(" ".join(errors), "forget failed"),
+                ("forget incomplete // " if deleted else "forget failed // ")
+                + _friendly_nmcli_error(" ".join(errors), "forget failed"),
+                profiles,
             )
+        elif deleted:
+            self.wifi_forget_finished.emit(True, "profile forgotten", profiles)
         else:
-            self.wifi_forget_finished.emit(False, "saved profile not found")
+            self.wifi_forget_finished.emit(False, "saved profile not found", profiles)
 
-    def _wifi_forget_finished(self, forgotten, status):
+    def _wifi_forget_finished(self, forgotten, status, profiles=None):
         self.wifi_forget_running = False
-        self.config_page.set_wifi_status(status)
-        self._scan_wifi()
+        current_session = (
+            self.mode == "config" and self.config_page.showing_wifi
+            and self.wifi_forget_context == self.config_page.wifi_session
+        )
+        self.wifi_forget_context = None
+        if profiles is not None:
+            self.config_page.update_wifi_profiles(profiles)
+        if current_session:
+            if forgotten and profiles is None:
+                status += " // rescan to refresh saved profiles"
+            self.config_page.set_wifi_status(status)
+        self._refresh_wifi_status()
         self._maybe_start_pending_wifi_reset()
 
     def _admin_reset_wifi(self):

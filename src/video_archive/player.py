@@ -12,6 +12,9 @@ from .config import MPV_LOG_FILE
 from .storage import clamp_int
 
 
+IPC_TIMEOUT_SECONDS = 0.2
+
+
 class MpvController(QObject):
     ready = Signal(int)
     ended = Signal(int)
@@ -152,24 +155,34 @@ class MpvController(QObject):
             + "\n"
         )
 
-        with self._send_lock:
-            if self._sock is None:
+        if not self._send_lock.acquire(timeout=IPC_TIMEOUT_SECONDS):
+            return False
+        try:
+            sock = self._sock
+            if sock is None:
                 return False
-
             try:
-                self._sock.sendall(
-                    payload.encode("utf-8")
-                )
+                sock.settimeout(IPC_TIMEOUT_SECONDS)
+                sock.sendall(payload.encode("utf-8"))
                 return True
             except OSError:
+                # A partial JSON write cannot safely be retried on this stream.
+                # Wake the reader so it reports failure through the normal path.
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
                 return False
+        finally:
+            self._send_lock.release()
 
     def stop(self, silent=False):
         self._stopping = True
         self._generation += 1
         reader_thread = self._reader_thread
+        sock = self._sock
 
-        if self._sock is not None:
+        if sock is not None:
             self.command(["quit"])
 
         if self.process is not None:
@@ -182,12 +195,17 @@ class MpvController(QObject):
                 except (OSError, subprocess.TimeoutExpired):
                     try:
                         self.process.kill()
-                    except OSError:
+                        self.process.wait(timeout=0.5)
+                    except (OSError, subprocess.TimeoutExpired):
                         pass
 
-        if self._sock is not None:
+        if sock is not None:
             try:
-                self._sock.close()
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                sock.close()
             except OSError:
                 pass
 
@@ -279,6 +297,7 @@ class MpvController(QObject):
             socket.SOCK_STREAM,
         )
 
+        sock.settimeout(IPC_TIMEOUT_SECONDS)
         try:
             sock.connect(
                 socket_path
@@ -312,10 +331,14 @@ class MpvController(QObject):
                 ["observe_property", 1, "eof-reached"],
                 ["loadfile", str(path), "replace"],
             ):
-                sock.sendall((json.dumps({"command": command}) + "\n").encode("utf-8"))
+                if not self.command(command):
+                    raise OSError("mpv IPC send failed")
 
             while generation == self._generation:
-                chunk = sock.recv(4096)
+                try:
+                    chunk = sock.recv(4096)
+                except socket.timeout:
+                    continue
                 if not chunk:
                     break
                 buffer += chunk
