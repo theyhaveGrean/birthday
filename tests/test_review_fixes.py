@@ -11,7 +11,7 @@ from video_archive.ui import ConfigWidget
 
 
 def config_widget():
-    return ConfigWidget('', '', '', [], 80, True, True, True, 80, 5)
+    return ConfigWidget('', '', '', [], 80, True, True, True, 80, 50, 5, 5)
 
 
 def test_wifi_profiles_read_ssid_from_each_profile(monkeypatch):
@@ -53,7 +53,9 @@ def test_wifi_recovery_deletes_only_matching_ssid(monkeypatch):
     app.VideoArchiveWindow._connect_wifi_worker(window, 'Home', 'password')
     assert ['nmcli', 'connection', 'delete', 'uuid', 'matching'] in commands
     assert all('other' not in command for command in commands)
-    assert results == [(True, 'connected')]
+    assert len(results) == 1
+    assert results[0][:2] == (True, 'connected')
+    assert results[0][2] is not None
 
 
 @pytest.mark.parametrize('leave_session', [False, True])
@@ -193,6 +195,7 @@ def test_player_reports_terminal_events_once(monkeypatch, tmp_path, termination)
     class Socket:
         def __init__(self, *args): pass
         def connect(self, path): pass
+        def settimeout(self, timeout): assert timeout > 0
         def sendall(self, payload): commands.append(json.loads(payload)['command'])
         def close(self): pass
         def recv(self, size):

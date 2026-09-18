@@ -15,6 +15,10 @@ from .config import (
     READ_MEMOS_FILE,
 )
 from .storage import atomic_write_json, atomic_write_text
+from .timestamps import (
+    MIN_SANE_YEAR, display_timezone, format_timestamp,
+    format_stored_timestamp, parse_timestamp,
+)
 
 MAX_MESSAGE_CHARS = 1200
 FETCH_TIMEOUT_SECONDS = 6
@@ -23,14 +27,13 @@ MAX_RESPONSE_BYTES = 256 * 1024
 SUPABASE_NOTES_URL = "https://rrwyqfddvijgimcslqkl.supabase.co/rest/v1/notes"
 SUPABASE_PUBLISHABLE_KEY = "sb_publishable_2Iurrigf7zF0by-BWoKE3g_IAT76514"
 SUPABASE_NOTES_SELECT = "id,name,message,created_at"
-MIN_SANE_YEAR = 2020
 _MEMO_STATE_LOCK = threading.RLock()
 
 
 def _load_json_file(path, default):
     try:
         return json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return default
 
 
@@ -98,19 +101,15 @@ def load_cached_message():
 
     try:
         return CLOUD_MESSAGE_FILE.read_text().strip()
-    except OSError:
+    except (OSError, UnicodeError):
         return ""
 
 
 def _format_sane_datetime(value):
-    if not value or value.year < MIN_SANE_YEAR:
-        return "TIME UNSYNCED"
-    if value.tzinfo:
-        value = value.astimezone()
-    return value.strftime("%Y-%m-%d %H:%M")
+    return format_timestamp(value)
 
 
-def load_cached_message_date():
+def _cached_message_timestamp():
     if CLOUD_MESSAGE_META_FILE.exists():
         loaded = _load_json_file(CLOUD_MESSAGE_META_FILE, {})
         if isinstance(loaded, dict):
@@ -129,7 +128,12 @@ def load_cached_message_date():
     except (OSError, ValueError, OverflowError):
         return ""
 
-    return _format_sane_datetime(value)
+    return value.isoformat()
+
+
+def load_cached_message_date():
+    value = _cached_message_timestamp()
+    return format_stored_timestamp(value) if value else ""
 
 
 def _memo_timestamp(value=None):
@@ -138,46 +142,56 @@ def _memo_timestamp(value=None):
 
 def load_memos():
     memos = []
-    if CLOUD_MEMOS_FILE.exists():
-        loaded = _load_json_file(CLOUD_MEMOS_FILE, [])
-        if isinstance(loaded, list):
-            seen_keys = set()
-            for item in loaded:
-                if not isinstance(item, dict):
-                    continue
+    loaded = _load_json_file(CLOUD_MEMOS_FILE, None)
+    archive_valid = isinstance(loaded, list)
+    if archive_valid:
+        seen_keys = set()
+        for item in loaded:
+            if not isinstance(item, dict):
+                continue
 
-                message = str(item.get("message", "")).strip()
-                if not message:
-                    continue
+            message = str(item.get("message", "")).strip()
+            if not message:
+                continue
 
-                normalized = {
-                    "id": str(item.get("id", "")).strip(),
-                    "date": str(item.get("date", "")).strip() or "--",
-                    "message": message,
-                }
-                name = str(item.get("name", "")).strip()
-                if name:
-                    normalized["name"] = name
-                if not normalized["id"]:
-                    # Stable migration keeps legacy read-state valid.
-                    normalized["id"] = _legacy_memo_key(normalized)
-                key = memo_key(normalized)
-                if key in seen_keys:
-                    continue
-                seen_keys.add(key)
-                memos.append(normalized)
+            normalized = {
+                "id": str(item.get("id", "")).strip(),
+                "date": str(item.get("date", "")).strip() or "--",
+                "message": message,
+            }
+            name = str(item.get("name", "")).strip()
+            if name:
+                normalized["name"] = name
+            if not normalized["id"]:
+                # Stable migration keeps legacy read-state valid.
+                normalized["id"] = _legacy_memo_key(normalized)
+            created_at = str(item.get("created_at", "")).strip()
+            if created_at:
+                normalized["created_at"] = created_at
+                normalized["date"] = format_stored_timestamp(created_at)
+            key = memo_key(normalized)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            memos.append(normalized)
 
     cached = load_cached_message()
-    if cached and not any(item["message"] == cached for item in memos):
-        memos.insert(
-            0,
-            {
-                "id": uuid.uuid4().hex,
-                "date": load_cached_message_date() or _memo_timestamp(),
-                "message": cached,
-            },
-        )
-        save_memos(memos)
+    if (cached and not archive_valid
+            and not any(item["message"] == cached for item in memos)):
+        migrated = {
+            "id": uuid.uuid4().hex,
+            "date": load_cached_message_date() or _memo_timestamp(),
+            "message": cached,
+        }
+        cached_timestamp = parse_timestamp(_cached_message_timestamp())
+        if cached_timestamp is not None and cached_timestamp.tzinfo is not None:
+            migrated["created_at"] = cached_timestamp.isoformat()
+        memos.insert(0, migrated)
+        try:
+            save_memos(memos)
+        except OSError as error:
+            # Keep the recovered memo usable even on read-only storage.
+            print(f"failed to persist recovered memo: {error}", flush=True)
 
     if len(memos) > MAX_MEMOS:
         memos = memos[:MAX_MEMOS]
@@ -214,6 +228,11 @@ def archive_memo(message, memo_date=None, allow_duplicate_top=False, memo_id=Non
             "date": memo_date or _memo_timestamp(),
             "message": message,
         }
+        if memo_date is None:
+            item["created_at"] = datetime.now(timezone.utc).isoformat()
+        elif (timestamp := parse_timestamp(memo_date)) is not None and timestamp.tzinfo is not None:
+            item["created_at"] = timestamp.isoformat()
+            item["date"] = format_timestamp(timestamp)
         if name:
             item["name"] = str(name).strip()
         memos.insert(0, item)
@@ -221,15 +240,16 @@ def archive_memo(message, memo_date=None, allow_duplicate_top=False, memo_id=Non
         return memos
 
 
-def save_cached_message(message, received_at=None):
+def save_cached_message(message, received_at=None, *, update_timestamp=False):
     normalized = message.strip()
-    if load_cached_message() == normalized and CLOUD_MESSAGE_FILE.exists():
+    if (not update_timestamp and load_cached_message() == normalized
+            and CLOUD_MESSAGE_FILE.exists()):
         return False
 
     atomic_write_text(CLOUD_MESSAGE_FILE, normalized + "\n")
     atomic_write_json(
         CLOUD_MESSAGE_META_FILE,
-        {"received_at": received_at or _memo_timestamp()},
+        {"received_at": received_at or datetime.now(timezone.utc).isoformat()},
     )
     return True
 
@@ -277,6 +297,11 @@ def _normalize_note_row(row):
         "date": _format_note_date(row.get("created_at")),
         "message": message,
     }
+    created_at = parse_timestamp(row.get("created_at"))
+    if created_at is not None:
+        # Supabase timestamps carry an offset. Persist it so display timezone
+        # changes can reformat the same instant without changing memo identity.
+        normalized["created_at"] = created_at.isoformat()
     name = str(row.get("name", "")).strip()
     if name:
         normalized["name"] = name
@@ -298,14 +323,33 @@ def _sync_supabase_notes(rows):
         if len(memos) >= MAX_MEMOS:
             break
 
-    save_memos(memos)
-    newest = memos[0] if memos else None
-    if newest:
-        save_cached_message(newest["message"], newest["date"])
-        return newest["message"]
+    with _MEMO_STATE_LOCK:
+        archived = load_memos()
+        # An absent remote row is not a deletion request. Preserve local
+        # history/read state, updating matching IDs and retaining the newest
+        # MAX_MEMOS entries under the existing bounded-retention policy.
+        merged = {memo_key(item): item for item in archived}
+        merged.update({memo_key(item): item for item in memos})
 
-    save_cached_message("", _memo_timestamp())
-    return ""
+        def chronological_key(item):
+            value = parse_timestamp(item.get("created_at") or item.get("date"))
+            if value is None:
+                return float("-inf")
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=display_timezone())
+            return value.timestamp()
+
+        save_memos(sorted(merged.values(), key=chronological_key, reverse=True))
+        newest = memos[0] if memos else None
+        if newest:
+            save_cached_message(
+                newest["message"], newest.get("created_at") or newest["date"],
+                update_timestamp=True,
+            )
+            return newest["message"]
+
+        save_cached_message("")
+        return ""
 
 
 def _http_error_body(error):

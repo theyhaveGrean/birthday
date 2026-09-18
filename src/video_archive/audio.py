@@ -15,6 +15,8 @@ from .storage import clamp_int
 SAMPLE_RATE = 22050
 MAX_SFX_VOLUME = 150
 SOUND_SCHEMA_VERSION = "3"
+# Generated UI sounds/chimes are short; recover if ALSA stops responding.
+PLAYBACK_TIMEOUT_SECONDS = 5.0
 
 
 class AudioController:
@@ -128,8 +130,9 @@ class AudioController:
                 stderr=subprocess.PIPE,
                 text=True,
                 check=False,
+                timeout=PLAYBACK_TIMEOUT_SECONDS,
             )
-        except OSError as error:
+        except (OSError, subprocess.TimeoutExpired) as error:
             print(f"audio failed for {name}: {error}", flush=True)
             return
 

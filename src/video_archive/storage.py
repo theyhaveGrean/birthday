@@ -11,7 +11,7 @@ def clamp_int(value, minimum, maximum):
 def clamp_int_or_default(value, minimum, maximum, default):
     try:
         return clamp_int(value, minimum, maximum)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return clamp_int(default, minimum, maximum)
 
 

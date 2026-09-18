@@ -48,7 +48,7 @@ def test_cached_message_date_migrates_from_old_mtime(monkeypatch, tmp_path):
     os.utime(cloud.CLOUD_MESSAGE_FILE, (timestamp, timestamp))
 
     assert cloud.load_cached_message_date() == cloud._format_sane_datetime(
-        cloud.datetime.fromtimestamp(timestamp)
+        cloud.datetime.fromtimestamp(timestamp, cloud.timezone.utc)
     )
 
 
@@ -185,12 +185,14 @@ def test_supabase_notes_are_synced_to_local_memos(monkeypatch, tmp_path):
         {
             "id": "note-2",
             "date": cloud._format_note_date("2026-08-31T23:00:00+00:00"),
+            "created_at": "2026-08-31T23:00:00+00:00",
             "message": "newest",
             "name": "Autumn",
         },
         {
             "id": "note-1",
             "date": cloud._format_note_date("2026-08-31T22:59:00+00:00"),
+            "created_at": "2026-08-31T22:59:00+00:00",
             "message": "older",
             "name": "Adityan",
         },
