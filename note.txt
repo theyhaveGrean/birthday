@@ -1,20 +1,87 @@
-Dear Autumn,
+Hi Autumn,
 
-This is placeholder text for now. It is intentionally long so the message screen can test scrolling.
+I'll keep this short - there's a lot of content on here
+for you to catch up on already :)
 
-Line 01: a small archive boots in the dark.
-Line 02: the screen hums, the buttons wait.
-Line 03: every clip is a little saved signal.
-Line 04: every saved signal points back to you.
-Line 05: left and right should move through this note.
-Line 06: select should close it and return to config.
-Line 07: the scrollbar should move as the text moves.
-Line 08: this line exists mostly for testing.
-Line 09: so does this one.
-Line 10: and this one, honestly.
-Line 11: replace all of this with the real note later.
-Line 12: there should still be room for more.
-Line 13: if this appears, scrolling is working.
-Line 14: end of placeholder transmission.
+Happy 20! I wanted to use this little blurb to
+walk through my thought process making this thing:
+the inspiration, the process - I feel like you'd
+appreciate that.
 
-- Adityan
+I probably had inklings of an idea around August -
+I originally wanted to make a beautifully edited video
+for you with all your friends and family. I wanted
+something big for your two decades, something you could
+look back on for the decades to come.
+
+As I started collecting videos, inspiration began
+trickling in - what if I made this something tangible,
+not something you could double-click to open a few years
+from now, but something you could touch, click, hear?
+
+And with that, I completely scrapped the original idea.
+I wanted to keep it simple, but have the design match
+your style. I started off sketching ideas. Eventually
+I started pulling inspiration from retro TVs/radios -
+something about the design really got to me, and I
+felt like it was something you would enjoy.
+
+Colors were pretty easy - green (obviously), and a
+complementary color. I figured cream would be a good
+match.
+
+The design went through a couple iterations before I
+settled on this one. Originally, I had a rotary dial
+in place for volume and scroll. I also had the switches
+laid out horizontally at one point. I feel like the 
+simplicity here landed at a sweet spot between having
+the device be controllable while keeping the design 
+itself relatively simplistic.
+
+And then I ordered the parts... oh, were there issues.
+The Raspberry Pi wouldn't fit in the enclosure when
+plugged in, I purchased the wrong speaker amplifiers,
+the switches weren't clicky enough, the power switch
+ran off the wrong voltage, and so much more. So many
+prototype parts were printed in the process.
+
+Then wiring! I honestly had a blast making the
+harnesses, plugging in the wires, testing circuits.
+I felt like an EE major for a couple days making this
+thing.
+
+A couple prototypes later, everything fit. Even better,
+everything worked! Speakers, switches, display. It was 
+so gratifying seeing it all come together for the first
+time.
+
+But the work wasn't over. I reprinted in PETG and found
+myself facing a new beast - spray painting. I had never
+done this before, but some concepts were familiar. Priming
+wasn't completely foreign to me - after all, we were
+doing something similar on aero last year. Understanding 
+spray patterns and actually spraying the paints and clear
+coats, though, was harder than I initially expected. I'm
+embarrassed of the number of times I had to sand and recoat
+the enclosure. After messing a couple pieces up, though,
+the enclosure was done within a week.
+
+And last but not least, final assembly. I'm so happy
+to see this thing come to life in full color. It was
+such a great project to work on and I really hope you
+enjoy it.
+
+
+---
+
+
+I made this because you deserve it. There are so many
+people who love you. You have touched all of our lives
+in meaningful ways, and I speak on behalf of everyone
+on this device when I say you've made our lives better.
+
+I love you, Autumn. You're the best part of my life
+and I'll cherish you always. I'll forever be proud
+to call you my love, my best friend, and my person.
+
+- Adityan 

@@ -1,10 +1,10 @@
 {
-  "volume": 30,
+  "volume": 65,
   "sfx_enabled": true,
   "memo_chime_enabled": true,
   "wake_on_memo": true,
   "brightness": 35,
-  "led_brightness": 15,
+  "led_brightness": 5,
   "sleep_led_brightness": 5,
   "sleep_timeout_minutes": 1,
   "screensaver_mode": "clock",

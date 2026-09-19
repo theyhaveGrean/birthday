@@ -822,10 +822,10 @@ class VideoArchiveWindow(QMainWindow):
         )
         self.cloud_error = ""
 
-        # Preserve the actual extension in the gallery:
-        # AUTUMN.mp4, TRIP.mov, etc.
+        # Show friendly names in the gallery while keeping the full paths in
+        # self.videos for playback.
         self.titles = [
-            path.name
+            path.stem
             for path in self.videos
         ]
 

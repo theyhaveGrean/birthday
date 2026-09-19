@@ -22,13 +22,13 @@ class InputController(QObject):
         super().__init__()
 
         self.left_button = Button(
-            27,
+            17,
             pull_up=True,
             bounce_time=0.05,
         )
 
         self.select_button = Button(
-            17,
+            27,
             pull_up=True,
             bounce_time=0.05,
             hold_time=0.8,

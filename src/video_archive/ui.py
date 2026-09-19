@@ -1349,7 +1349,7 @@ class SettingsRenderer:
         else:
             detail_title = ("MESSAGE.TXT", "WIFI SETUP", "SOUND SETTINGS", "DISPLAY SETTINGS", "ABOUT", "SYSTEM REBOOT", "RETURN")[widget.selected_index]
             if widget.selected_index == 0:
-                detail_text = "SELECT TO READ THE NOTE"
+                detail_text = "NOTE HIDDEN INSIDE :)"
             elif widget.selected_index == 1:
                 ssid = widget.wifi_current.get("ssid") or "not connected"
                 detail_text = f"NETWORK // {ssid}\nSELECT TO MANAGE WIFI"

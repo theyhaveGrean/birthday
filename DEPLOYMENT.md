@@ -13,8 +13,8 @@ Required OS packages/services:
 
 GPIO mapping:
 
-- left / previous: GPIO 27
-- select: GPIO 17
+- top / up / previous: GPIO 17
+- middle / select: GPIO 27
 - right / next: GPIO 22
 - status LED: GPIO 13 (PWM 50% while the display is awake; off while sleeping)
 
