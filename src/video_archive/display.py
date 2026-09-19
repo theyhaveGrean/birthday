@@ -127,7 +127,10 @@ class DisplayController:
         if self._led is None:
             return
         try:
-            duty_cycle = self._led_brightness / self.MAX_BRIGHTNESS
+            brightness = (
+                self._sleep_led_brightness if self._sleeping else self._led_brightness
+            )
+            duty_cycle = brightness / self.MAX_BRIGHTNESS
             self._led.value = duty_cycle if enabled else 0
         except (AttributeError, OSError, RuntimeError) as error:
             self._report_error_once("led", f"GPIO {self.STATUS_LED_GPIO} write failed: {error}")
